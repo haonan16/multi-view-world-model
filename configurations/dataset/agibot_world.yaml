@@ -1,0 +1,30 @@
+defaults:
+  - video_base
+  - _self_
+
+data_root: /n/holylfs06/LABS/kempner_shared/Everyone/testbed/multimodal/eiwm_data/agibot_world
+metadata_path: merged_metadata.csv
+load_prompt_embed: true  # makes loader emit prompt_embeds (zeros fallback if no embed file)
+
+filtering: # filter raw videos based on these criteria
+  n_frames: [60, 360] # number of frames range for the videos
+
+# Raymap-aligned dataset: raw resize only, no random crop/flip/scale.
+augmentation:
+  random_flip: null
+  ratio: null
+  scale: null
+
+fps_override: 60
+
+# Static-camera raymap: AgibotWorld head-camera clips have no camera motion,
+# so extrinsics are identity for every frame and ray moments are zero.
+height: 240
+width: 320
+raymap_height: 30   # height // vae_stride (240 // 8)
+raymap_width: 40        # 640 // 8
+intrinsics_fov_deg: 70.0   # horizontal FOV used to build the static K
+
+# Task_ids whose head camera is NOT static (manual audit). Records whose
+# video_path is observations/{task_id}/... are dropped at load time.
+blocked_task_ids: ['446']

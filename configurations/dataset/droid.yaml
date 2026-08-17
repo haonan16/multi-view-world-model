@@ -1,0 +1,19 @@
+defaults:
+  - openx_base
+  - _self_
+
+data_root: data/droid
+#metadata_path: no_recaption.csv
+metadata_path: merged_metadata.csv
+load_prompt_embed: true
+pad_mode: slowdown
+
+filtering: # filter raw videos based on these criteria
+  n_frames: [0, 300] # number of frames range for the videos
+  height: [0, 4096] # height range for the videos
+  width: [0, 4096] # width range for the videos
+  fps: [0, 100] # fps range for the videos
+
+download:
+  override_fps: 75 # x5 speedup
+  views: ["ext1", "ext2"] #, "wrist_image_left"

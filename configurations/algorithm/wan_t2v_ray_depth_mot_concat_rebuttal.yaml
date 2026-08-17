@@ -1,0 +1,9 @@
+# Rebuttal-only variant: identical config to wan_t2v_ray_depth_mot_concat, but its
+# _name (= this filename) routes to WanTextToVideoRayDepthMoTConcatRebuttal via
+# experiments/exp_video.py:compatible_algorithms. That class is a byte-for-byte copy of
+# the concat class plus an env-gated per-modality loss weight (REBUTTAL_LOSS_W). With the
+# env unset it is identical to the base class, so this config is safe to use anywhere;
+# the R1 ablation launch scripts set REBUTTAL_LOSS_W to zero out depth or pose losses.
+defaults:
+  - wan_t2v_ray_depth_mot
+  - _self_

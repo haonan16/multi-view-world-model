@@ -1,0 +1,13 @@
+defaults:
+  - openx_base
+  - _self_
+data_root: data/openx_embodiment/bridge
+metadata_path: merged_metadata.csv
+
+download:
+  openx_name: bridge 
+  openx_fps: 10 # TODO: change this according to visualization
+  views: ["image"]
+
+filtering:
+  n_frames: [15, 60]

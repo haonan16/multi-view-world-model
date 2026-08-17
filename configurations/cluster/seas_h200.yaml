@@ -1,0 +1,38 @@
+defaults:
+  - base_slurm
+  - _self_
+params:
+  partition: seas_gpu
+  account: ydu_lab
+  env_name: test2
+  num_gpus: 4
+  num_cpus: 48
+  memory: 256G
+  time: "2-00:00:00" 
+
+launch_template: |
+  #!/bin/bash
+  #SBATCH -J {name}
+  #SBATCH -o {log_dir}/out_%j.out
+  #SBATCH -e {log_dir}/error_%j.err
+  #SBATCH --mail-user={email}
+  #SBATCH --mail-type=FAIL
+  #SBATCH --account={account}
+  #SBATCH --partition={partition}
+  #SBATCH --nodes=${experiment.num_nodes}
+  #SBATCH --ntasks-per-node={num_gpus}
+  #SBATCH --gres=gpu:nvidia_h200:{num_gpus}
+  #SBATCH --cpus-per-task=12
+  #SBATCH --mem={memory}
+  #SBATCH --time={time}
+  
+  # export NCCL_DEBUG=INFO
+  # export PYTHONFAULTHANDLER=1
+
+  cd {project_root}
+  module load Mambaforge
+  mamba deactivate
+  mamba activate {env_name}
+  module load cuda/12.4.1-fasrc01
+  module load gcc/9.5.0-fasrc01
+  srun python -m main {python_args} 

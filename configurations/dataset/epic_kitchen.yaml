@@ -1,0 +1,25 @@
+defaults:
+  - video_base
+  - _self_
+
+data_root: data/epic_kitchens
+#metadata_path: no_recaption.csv
+metadata_path: merged_metadata.csv
+load_prompt_embed: true
+pad_mode: slowdown
+
+filtering:
+  n_frames: [15, 216]
+
+download:
+  annotation_url:
+    training: https://raw.githubusercontent.com/epic-kitchens/epic-kitchens-100-annotations/refs/heads/master/EPIC_100_train.csv
+    validation: https://raw.githubusercontent.com/epic-kitchens/epic-kitchens-100-annotations/refs/heads/master/EPIC_100_validation.csv
+  md5_url: https://raw.githubusercontent.com/epic-kitchens/epic-kitchens-download-scripts/refs/heads/master/data/md5.csv
+  errata_url: https://raw.githubusercontent.com/epic-kitchens/epic-kitchens-download-scripts/refs/heads/master/data/errata.csv
+  splits_url:
+    epic_55: https://raw.githubusercontent.com/epic-kitchens/epic-kitchens-download-scripts/refs/heads/master/data/epic_55_splits.csv
+    epic_100: https://raw.githubusercontent.com/epic-kitchens/epic-kitchens-download-scripts/refs/heads/master/data/epic_100_splits.csv
+  removal_threshold: [48, 128] # when the clip is above the lower bound, trim a fraction of frames
+  removal_rate_max: 0.75
+  removal_front_back: [0.0, 1.0]

@@ -1,0 +1,6 @@
+defaults:
+  - video_base
+  - _self_
+
+data_root: data/something_something_v2
+metadata_path: merged_metadata.csv

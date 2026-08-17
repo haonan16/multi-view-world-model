@@ -1,0 +1,14 @@
+defaults:
+  - video_base
+  - _self_
+
+data_root: data/pandas
+#metadata_path: no_recaption.csv
+metadata_path: merged_metadata.csv
+load_prompt_embed: true
+trim_mode: random_cut
+
+test_percentage: 0.01
+
+filtering:
+  n_frames: [60, 121]

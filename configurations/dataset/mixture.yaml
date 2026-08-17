@@ -1,0 +1,41 @@
+defaults:
+  - video_base
+  - pandas@subset/pandas
+  - epic_kitchen@subset/epic_kitchen
+  - ego4d@subset/ego4d
+  - droid@subset/droid
+  - something_something@subset/something_something
+  - bridge@subset/bridge
+  - agibot_world@subset/agibot_world
+  - language_table@subset/language_table
+  - _self_
+
+data_root: null
+metadata_path: null
+load_prompt_embed: true
+load_video_latent: false
+fps: 16
+
+training:
+  weight_type: relative # relative weight consider the original size of the dataset, absolute weight doesn't 
+  weight:
+    pandas: 0.5
+    epic_kitchen: 2.0
+    ego4d: 1.5
+    droid: 1.0
+    something_something: 0.5
+    bridge: 1.0
+    agibot_world: 1.0 # 2.5 for phase 3 and 1.0 for phase 3.5
+    language_table: 0.05
+
+validation:
+  weight_type: absolute # relative weight consider the original size of the dataset, absolute weight doesn't 
+  weight:
+    pandas: 1.0
+    epic_kitchen: 1.0
+    ego4d: 1.0
+    droid: 1.0
+    something_something: 0.25
+    bridge: 1.0
+    agibot_world: 1.0
+    language_table: 0.25

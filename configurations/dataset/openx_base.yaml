@@ -1,0 +1,22 @@
+defaults:
+  - video_base
+  - _self_
+# data_root: /n/holylfs06/LABS/sham_lab/Lab/eiwm_data/openx/
+# metadata_path: /n/holylfs06/LABS/sham_lab/Lab/eiwm_data/openx/robot_dataset_language_table.jsonl
+
+data_root: ??? # e.g. data/openx_embodiment/bridge
+metadata_path: ??? # e.g. bridge.csv
+
+download:
+  openx_name: ??? # as defined in the offical colab notebook. The name for the path gs://gresearch/robotics/{openx_name}
+  openx_version: "0.1.0" # version number from open-x itself. only need to change for language_table and robo_net
+  openx_fps: ??? # open-x doesn't provide fps in dataset but in the associate google sheet, so we manually define it here. See https://docs.google.com/spreadsheets/d/1rPBD77tk60AEIGZrGSODwyyzs5FgCU9Uz3h-3_t2A9g/
+  views: ??? # e.g. a list of names of the views to put into the final metadata  e.g. ["wrist_cam", "top_view"]
+
+filtering:
+  disable: false
+
+augmentation:
+  random_flip: null  # probability of random flip, null means no random flip
+  ratio: [1.0, 1.0] # random scaling of the aspect ratio, see torchvision.transforms.v2.RandomResizedCrop
+  scale: [1.0, 1.0] # random crop the video, see torchvision.transforms.v2.RandomResizedCrop

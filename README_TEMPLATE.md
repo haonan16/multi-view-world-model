@@ -1,0 +1,225 @@
+# Project Instructions
+
+## Using Harvard FAS cluster
+After getting an account from Yilun, you shall follow instructions of [this](https://docs.rc.fas.harvard.edu/kb/quickstart-guide/) to ssh into login node of Harvard FAS cluster. 
+
+On login node, they use a `conda` alternative `mamba` so create a conda environment like this:
+```
+module load Mambaforge
+mamba create python=3.10 -n ei_world_model
+```
+
+Setup virtual env via
+```
+mamba activate ei_world_model
+pip install -r requirements.txt
+module load gcc/9.5.0-fasrc01
+DS_BUILD_UTILS=1 DS_BUILD_FUSED_ADAM=1 DS_BUILD_CPU_ADAM=1 pip install deepspeed
+```
+
+Download ckpts:
+```
+huggingface-cli download Wan-AI/Wan2.1-I2V-14B-480P --local-dir ./data/ckpts/Wan2.1-I2V-14B-480P
+huggingface-cli download Wan-AI/Wan2.1-T2V-1.3B --local-dir ./data/ckpts/Wan2.1-T2V-1.3B
+```
+
+We provide an easy interface to launch jobs for you. Please read the first paragraph of `Infra instructions` section to understand how to launch jobs on Harvard FAS. 
+
+## Development
+1. For better collaboration, always work on a branch that's not main and create a pull request. After the PR is reviewed, do squash merge. Commiting to main branch directly is forbidden.
+
+2. There is a `scripts` folder for you to store all dummy code & jupyter notebooks, but try write clean and persistent code elsewhere because we want users to be able to run everything without the `scripts` folder.
+
+## Add Dataset on Harvard FAS cluster
+To add a dataset, please follow the 3 steps below (to be updated as gemini captioning come in)
+
+1. Data: Put your dataset data under some new folder under `/n/holylfs06/LABS/sham_lab/Lab/eiwm_data`. Give other collaborators permission via `chmod -R 775 /n/holylfs06/LABS/sham_lab/Lab/eiwm_data/{dataset_name}`. Then create a symolic link via `ln -s /n/holylfs06/LABS/sham_lab/Lab/eiwm_data/{dataset_name} data/{dataset_name}`. Everything in your code shall use a relative path.
+2. Metadata: Create a csv file under your dataset folder e.g. `/n/holylfs06/LABS/sham_lab/Lab/eiwm_data/{dataset_name}/metadata.csv`. The metadata shall be a table with columns with at least these columns: `video_path`, `caption`, `height`, `width`, `fps`, `n_frames`. Importantly, let's define `fps` as such: `for a task in real life that typically takes 1 second to finish, how many frames does it take in this dataset to reflect?` This shall be the same as video fps for most datasets, but could be different for Open-X. There are optional fields you can put, such as `split`,`crop_top`, `crop_bottom`, `crop_left`, `crop_right`, `trim_start`, `trim_end`, `video_latent_path`, `image_latent_path`, `prompt_embed_path`, `original_caption` which can have special effects, but also feel free to add whatever other fields you want to put in it.
+3. Coding: inherit the class `VideoDataset` from `datasets/video_base.py`, then create a yaml file for it
+at `configurations/dataset/{your_dataset_name}.yaml`. Then register the dataset in `experiments/exp_video.py`, with the key as `{your_dataset_name}` and the value correspond to the new child class you just created. Notably, one can have multiple keys pointing to the same
+class, which means that you can use the same class with different yaml files. Optionally, for important datasets that the downstream users also need, override the `download()` method for the dataset class, which allows a command like `python main.py +name=debug dataset={your_dataset_name} experiment.tasks=[download_dataset]` to trigger dataset downloading. However, this optinal part is not strictly required, as our users may not need to download everything we downloaded.
+4. Unit test: First register your dataset name in  `experiments/process_data.py`, then run `python main.py +name=visualize_dataset experiment=process_data dataset={your_dataset_name} experiment.tasks=[visualize_dataset]` to visulize on browser. There is a shortcut for launching on slurm clusters, please check the infra instructions section. 
+5. Optionally, there are certain scenarios where you want to preprocess the data further by creating a new metadatacsv and new files. For example, you may want to cache the prompt embeddings for CogVideoX. You can do so by adding a method to the `experiment/process_data.py` as well as `configurations/experiment/process_data.yaml`, and then running `python main.py +name={give_it_a_name} experiment=process_data dataset={your_dataset_name} experiment.tasks=[{your_method_name}]` to launch it.
+
+## Common commands and options
+Visualize Dataset: `python main.py +name={your_experiment_name} experiment=process_data dataset={your_dataset_name} experiment.tasks=[visualize_dataset]`
+
+e.g. `python main.py +name=visualize_ego4d experiment=process_data dataset=ego4d experiment.tasks=[visualize_dataset]`
+
+Train Wan 2.1 I2V 14B: `python main.py +name={your_experiment_name} experiment=exp_video algorithm=wan_i2v dataset=mixture` 
+
+Train Wan 2.1 T2V 1.3B: `python main.py +name={your_experiment_name} experiment=exp_video algorithm=wan_t2v dataset=mixture` 
+
+Debug with toy Wan model and dummy dataset:
+`python main.py +name={your_experiment_name} experiment=exp_video algorithm=wan_toy dataset=dummy`
+
+Run 1 batch validation visualization using any of these above models: `{base_wan2.1_command} experiment.tasks=[validation]`
+
+Enable Diffusion Forcing: `{base_wan2.1_command} algorithm.diffusion_forcing=True`
+
+14B models are big and would need 16 GPUs. See below for how to run on harvard clusters. The code supports automatic slurm submission script if you just run it on login node. See `Infra instructions` section for more details and availble options.
+
+On a slurm login node `{base_command} cluster={your_cluster_name}`
+
+On harvard FAS cluster with 1 GPU for debugging purpose: `{base_command} cluster=fas_single`
+
+On harvard FAS cluster high priority queue with 4 GPUs: `{base_command} cluster=fas_high`
+
+On harvard FAS cluster high priority queue with 32 GPUs (recommended): `{base_command} cluster=fas_high experiment.num_nodes=8`
+
+On harvard FAS cluster low priority queue with 4 GPUs: `{base_command} cluster=fas_low`
+
+Run data processing: `python main.py +name=process_data experiment=process_data dataset={your_dataset_name} experiment.tasks=[{your_method_name}}]`
+
+Run single-GPU inference: `python scripts/inference_single_gpu.py`
+
+Run inference server: `python -m main +name=inference_server experiment=exp_video algorithm=wan_i2v dataset=dummy experiment.tasks=[test] algorithm.sample_steps=40 algorithm.load_prompt_embed=False`
+
+Run inference client `python scripts/inference_client.py`
+
+# Infra instructions
+This repo is forked from [Boyuan Chen](https://boyuan.space/)'s research template repo.
+
+All experiments can be launched via `python -m main +name=xxxx {options}` where you can fine more details later in this article.
+
+For slurm clusters e.g. mit supercloud, you can run `python -m main cluster=mit_supercloud {options}` on login node. 
+It will automatically generate slurm scripts and run them for you on a compute node. Even if compute nodes are offline, 
+the script will still automatically sync wandb logging to cloud with <1min latency. It's also easy to add your own slurm
+by following the `Add slurm clusters` section.
+
+For multi node training, e.g. running it on Harvard FAS cluster with 2 nodes each featuring 2 gpus, simply append 
+`cluster=harvard_fas cluster.params.num_gpus=2 experiment.num_nodes=2` to original command (such as the command in `Run built-in example` section).
+
+## Setup
+
+Run `conda create python=3.10 -n {your_env_name}` to create environment.
+Run `conda activate {your_env_name}` to activate this environment.
+Run `pip install -r requirements.txt` to install all dependencies.
+
+[Sign up](https://wandb.ai/site) a wandb account for cloud logging and checkpointing. In command line, run `wandb login` to login.
+
+Then modify the wandb entity (account) in `configurations/config.yaml`.
+
+If using VScode, please modify `.vscode/settings.json` so python interpreter is set correctly.
+
+## Run built-in example
+
+Run an example machine-learning experiment with a specified dataset and algorithm:
+`python -m main +name=xxxx experiment=example_classification dataset=example_cifar10 algorithm=example_classifier`
+
+The files associated with this example are:
+<ul>
+  <li>algorithms/examples/classifier/classifier.py</li>
+  <li>configurations/algorithm/example_classifier.yaml</li>
+  <li>datasets/example_classification/cifar10.py</li>
+  <li>configurations/dataset/example_cifar10.yaml</li>
+  <li>experiments/example_classification.py</li>
+  <li>configurations/experiment/example_classification.yaml</li>
+</ul>
+
+Run a generic example experiment (not necessarily ML):
+`python -m main +name=yyyy experiment=hello_world algorithm=hello_algo1`
+
+The files associated with this example are:
+<ul>
+  <li>algorithms/examples/helloworld/example_algos.py</li>
+  <li>configurations/algorithm/example_helloworld_1.yaml</li>
+  <li>experiments/example_helloworld.py</li>
+  <li>configurations/experiment/example_helloworld.yaml</li>
+</ul>
+
+
+Run a generic example experiment, with different algorithm:
+`python -m main +name=zzzz experiment=hello_world algorithm=hello_algo2`
+<ul>
+  <li>algorithms/examples/helloworld/example_algos.py</li>
+  <li>configurations/algorithm/example_helloworld_2.yaml</li>
+  <li>experiments/example_helloworld.py</li>
+  <li>configurations/experiment/example_helloworld.yaml</li>
+</ul>
+
+## Modify for your own project
+
+First, create a new repository with this template. Make sure the new repository has the name you want to use for wandb
+logging.
+
+Add your method and baselines in `algorithms` following the `algorithms/README.md` as well as the example code in
+`algorithms/examples/classifier/classifier.py`. For pytorch experiments, write your algorithm as a [pytorch lightning](https://github.com/Lightning-AI/lightning)
+`pl.LightningModule` which has extensive
+[documentation](https://lightning.ai/docs/pytorch/stable/). For a quick start, read "Define a LightningModule" in this [link](https://lightning.ai/docs/pytorch/stable/starter/introduction.html). Finally, add a yaml config file to `configurations/algorithm` imitating that of `configurations/algorithm/example_classifier.yaml`, for each algorithm you added.
+
+(If doing machine learning) Add your dataset in `datasets` following the `datasets/README.md` as well as the example code in
+`datasets/classification.py`. Finally, add a yaml config file to `configurations/dataset` imitating that of
+`configurations/dataset/example_cifar10.yaml`, for each dataset you added.
+
+Add your experiment in `experiments` following the `experiments/README.md` or following the example code in
+`experiments/exp_classification.py`. Then register your experiment in `experiments/__init__.py`.
+Finally, add a yaml config file to `configurations/experiment` imitating that of
+`configurations/experiment/example_classification.yaml`, for each experiment you added. 
+
+Modify `configurations/config.yaml` to set `algorithm` to the yaml file you want to use in `configurations/algorithm`;
+set `experiment` to the yaml file you want to use in `configurations/experiment`; set `dataset` to the yaml file you
+want to use in `configurations/dataset`, or to `null` if no dataset is needed; Notice the fields should not contain the
+`.yaml` suffix.
+
+You are all set!
+
+`cd` into your project root. Now you can launch your new experiment with `python main.py +name=example_name`. You can run baselines or
+different datasets by add arguments like `algorithm=xxx` or `dataset=xxx`. You can also override any `yaml` configurations by following the next section.
+
+One special note, if your want to define a new task for your experiment, (e.g. other than `training` and `test`) you can define it as a method in your experiment class (e.g. the `main` task in `experiments/example_helloworld.py`) and use `experiment.tasks=[task_name]` to run it. Let's say you have a `generate_dataset` task before the task `training` and you implemented it in experiment class, you can then run `python -m main +name xxxx experiment.tasks=[generate_dataset,training]` to execute it before training.
+
+## Pass in arguments
+
+We use [hydra](https://hydra.cc) instead of `argparse` to configure arguments at every code level. You can both write a static config in `configuration` folder or, at runtime,
+[override part of yur static config](https://hydra.cc/docs/tutorials/basic/your_first_app/simple_cli/) with command line arguments. 
+
+For example, arguments `algorithm=example_classifier experiment.lr=1e-3` will override the `lr` variable in `configurations/experiment/example_classifier.yaml`. The argument `wandb.mode` will override the `mode` under `wandb` namesspace in the file `configurations/config.yaml`.
+
+All static config and runtime override will be logged to cloud automatically.
+
+
+## Resume a checkpoint & logging
+For machine learning experiments, all checkpoints and logs are logged to cloud automatically so you can resume them on another server. Simply append `resume={wandb_run_id}` to your command line arguments to resume it. The run_id can be founded in a url of a wandb run in wandb dashboard. By default, latest checkpoint in a run is stored indefinitely and earlier checkpoints in the run will be deleted after 5 days to save your storage.
+
+On the other hand, sometimes you may want to start a new run with different run id but still load a prior ckpt. This can be done by setting the `load={wandb_run_id / ckpt path}` flag.
+
+## Load a checkpoint to eval
+The argument `experiment.tasks=[task_name1,task_name2]` (note the `[]` brackets here needed) allows to select a sequence of tasks to execute, such as `training`, `validation` and `test`. Therefore, for testing a machine learning ckpt, you may run `python -m main load={your_wandb_run_id} experiment.tasks=[test]`.
+
+More generally, the task names are the corresponding method names of your experiment class. For `BaseLightningExperiment`, we already defined three methods `training`, `validation` and `test` for you, but you can also define your own tasks by creating methods to your experiment class under intended task names.
+
+## Debug
+We provide a useful debug flag which you can enable by `python main.py debug=True`. This will enable numerical error tracking as well as setting `cfg.debug` to `True` for your experiments, algorithms and datasets class. However, this debug flag will make ML code very slow as it automatically tracks all parameter / gradients!
+
+## Hyperparameter Sweep
+
+Launch hyperparameter sweep via: `wandb sweep configurations/sweep/example_sweep.yaml`
+Then, launch sweep agents on different servers by running the command printed by the controller (e.g., `wandb agent <agent_id>`).
+
+
+## Add slurm clusters
+It's very easy to add your own slurm clusters via adding a yaml file in `configurations/cluster`. You can take a look 
+at `configurations/cluster/mit_supercloud.yaml` for example. 
+
+
+## Feature Roadmap
+
+| **Features**                  | **This repo** |
+| ---------------------------   | ----------------------|
+| README level documentation    | :heavy_check_mark: |
+| Examples  (ML & Non ML)       | :heavy_check_mark: |
+| Cloud checkpoint save / load  | :heavy_check_mark: |
+| Cloud logging                 | :heavy_check_mark: |
+| Hyper-parameter logging       | :heavy_check_mark: |
+| Static yaml configuration     | :heavy_check_mark: |
+| Yaml config override by arugment  | :heavy_check_mark: |
+| Submit UI for MIT cluster     | :heavy_check_mark: |
+| Distributed training          | :heavy_check_mark: |
+| Low precision training        | :heavy_check_mark: |
+| Distributed hyper-parameter sweep | :heavy_check_mark: |
+| Debug mode                    | :heavy_check_mark: |
+| PEP 8 Style                   | :heavy_check_mark: |
+| Type hints                    | :heavy_check_mark: |
+| Wiki style documentation      | :x: |
+| Unit test                     | :x: |

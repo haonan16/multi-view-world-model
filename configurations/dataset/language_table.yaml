@@ -1,0 +1,14 @@
+defaults:
+  - openx_base
+  - _self_
+  
+data_root: data/openx_embodiment/language_table
+metadata_path: merged_metadata.csv
+
+download:
+  openx_name: language_table
+  openx_fps: 6
+  views: ["rgb"]
+
+filtering:
+  n_frames: [7, 35]
