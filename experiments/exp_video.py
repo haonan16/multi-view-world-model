@@ -6,8 +6,10 @@ from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from algorithms.wan import (
     WanTextToVideoRayDepthMoTConcat5B,
     WanTextToVideoRayDepthMoTConcatRebuttal,
+    WanMultiView,
 )
 from datasets.mixture import MixtureDataset
+from datasets.rh20t import RH20TMultiViewDataset
 from .exp_base import BaseLightningExperiment
 
 
@@ -19,11 +21,13 @@ class VideoPredictionExperiment(BaseLightningExperiment):
     compatible_algorithms = dict(
         wan_t2v_ray_depth_mot_concat_5b=WanTextToVideoRayDepthMoTConcat5B,
         wan_t2v_ray_depth_mot_concat_rebuttal=WanTextToVideoRayDepthMoTConcatRebuttal,
+        wan_multiview=WanMultiView,   # multiview ablation: design=tokens | tiled
     )
 
     compatible_datasets = dict(
         mixture_parallax14=MixtureDataset,      # Model F (5B), 14 subsets
         mixture_tartanair_re10k=MixtureDataset,  # 1.3B R1 ablations
+        rh20t_multiview=RH20TMultiViewDataset,   # multiview ablation (tokens vs tiled)
     )
 
     def _build_strategy(self):

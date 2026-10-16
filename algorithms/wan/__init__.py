@@ -6,4 +6,6 @@ from .wan_t2v_ray_depth_mot_concat_rebuttal import WanTextToVideoRayDepthMoTConc
 __all__ = [
     "WanTextToVideoRayDepthMoTConcat5B",
     "WanTextToVideoRayDepthMoTConcatRebuttal",
+    "WanMultiView",
 ]
+from .wan_multiview import WanMultiView

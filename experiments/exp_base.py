@@ -87,7 +87,7 @@ class BaseExperiment(ABC):
         from lightning.pytorch.strategies.ddp import DDPStrategy
 
         return (
-            DDPStrategy(find_unused_parameters=True)
+            DDPStrategy(find_unused_parameters=self.cfg.get("find_unused_parameters", True))
             if torch.cuda.device_count() > 1
             else "auto"
         )

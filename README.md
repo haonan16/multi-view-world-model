@@ -1,3 +1,70 @@
+# Multiview video world model: views as tokens vs views tiled (RH20T)
+
+Ablation of two ways to feed V calibrated camera views to one video diffusion model
+(Wan2.1-T2V-1.3B, flow matching), trained on RH20T robot episodes (4 front-facing views,
+13 frames at 3 fps, 160×320 per view):
+
+- **tokens** — each view is VAE-encoded separately; all views' tokens share one sequence
+  (same RoPE grid per view, so views are told apart only by their camera).
+- **tiled** — the 4 views are downscaled into one 2×2 canvas of the same size (4× fewer tokens).
+
+Both get each view's camera as a Plücker raymap concatenated to the latent channels
+(zero-initialised), condition on frame 0 of every view, and predict frames 1–12.
+
+| file | |
+|---|---|
+| `algorithms/wan/wan_multiview.py` | training / sampling / validation (`algorithm.design=tokens\|tiled`) |
+| `algorithms/wan/modules/model_multiview.py` | multiview Wan backbone (raymap channels, per-view RoPE) |
+| `datasets/rh20t.py`, `datasets/_multiview.py` | synced multiview RH20T loader, tiling helpers |
+| `configurations/{algorithm/wan_multiview,dataset/rh20t_multiview}.yaml` | configs |
+| `scripts/rh20t/` | data prep, training, inference, point clouds, viewers |
+
+Paths in the configs and `.sbatch` files point at the Harvard FASRC cluster; change them for another machine.
+
+### Data (once)
+```bash
+sbatch scripts/rh20t/lowres_download.sbatch           # official 320×180 RGB + calibration
+sbatch scripts/rh20t/make_null_prompt_embed.sbatch    # UMT5 embedding of "" (no captions used)
+sbatch scripts/rh20t/check_dataset_wandb.sbatch       # optional: sanity-check samples in wandb
+```
+
+### Train (4 GPUs, DDP)
+```bash
+DESIGN=tokens NAME=mv_tokens STEPS=30000 sbatch scripts/rh20t/train_multiview.sbatch algorithm.gradient_checkpointing_rate=1
+DESIGN=tiled  NAME=mv_tiled  STEPS=30000 sbatch scripts/rh20t/train_multiview.sbatch
+```
+`RUN_DIR=<run dir>` resumes from its `checkpoints/last.ckpt`, `WANDB_RUN_ID=<id>` keeps logging
+into the same wandb run, `CKPT_EVERY` sets the save interval, and `RACE=1` lets the same job be
+queued in several partitions (first to start cancels the others). Tokens needs full gradient
+checkpointing to fit in 80 GB. `scripts/rh20t/compare_runs.py <tokens_id> <tiled_id>` prints both
+runs' validation curves.
+
+### Inference and evaluation
+```bash
+OUT=<dir>
+python scripts/rh20t/infer_multiview.py --out $OUT --n 15 \
+    --tokens_ckpt <tokens.ckpt> --tiled_ckpt <tiled.ckpt>       # held-out scenes: GT / tokens / tiled + metrics.json
+python scripts/rh20t/make_compare_videos.py $OUT <viewer>/vid   # GT-vs-prediction videos per scene
+python scripts/rh20t/vggt_dynamic_clouds.py --root $OUT --out $OUT/clouds_native --native   # VGGT-Omega dynamic point clouds
+python scripts/rh20t/render_cloud_videos.py --root $OUT --clouds clouds_native --out $OUT/videos   # point-cloud videos
+python scripts/rh20t/bake_cloud_viewer.py --root $OUT --out <cloud_viewer>   # data for scripts/rh20t/viewer/index.html
+```
+`infer_multiview.sbatch` (with `VGGT=1`) runs the first and third steps on a GPU node. The
+interactive viewer is a static page: copy `scripts/rh20t/viewer/index.html` plus three.js r128
+(`three.min.js`, `OrbitControls.js`) next to the baked data and serve it with `python -m http.server`.
+VGGT-Omega is loaded from a local clone (path set at the top of `vggt_dynamic_clouds.py`).
+
+### Result (30k steps, held-out validation)
+| | PSNR ↑ | SSIM ↑ | LPIPS ↓ |
+|---|---|---|---|
+| tokens | 22.0–22.8 | 0.72–0.73 | 0.080–0.090 |
+| tiled | 20.6–21.2 | 0.56–0.57 | 0.246–0.257 |
+| copy frame 0 | 25.9 | — | 0.055 |
+
+Tokens wins at every checkpoint and at equal compute; neither model yet beats copying frame 0.
+
+---
+
 # Clean training code — Model F (5B) and the 1.3B R1 ablations
 
 This repo is forked from [Boyuan Chen](https://boyuan.space/)'s research
