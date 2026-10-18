@@ -28,6 +28,7 @@ class VideoPredictionExperiment(BaseLightningExperiment):
         mixture_parallax14=MixtureDataset,      # Model F (5B), 14 subsets
         mixture_tartanair_re10k=MixtureDataset,  # 1.3B R1 ablations
         rh20t_multiview=RH20TMultiViewDataset,   # multiview ablation (tokens vs tiled)
+        rh20t_multiview_v2=RH20TMultiViewDataset,   # v2: 17 frames @ 1.5 fps, scale-normalised cameras
     )
 
     def _build_strategy(self):

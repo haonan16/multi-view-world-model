@@ -1,0 +1,11 @@
+defaults:
+  - rh20t_multiview
+  - _self_
+
+# v2: longer clips with more action. Copy-frame-0 PSNR on held-out clips (lower = more
+# motion): 13 @ 3 fps (4 s) 26.4 dB, 17 @ 2 fps 21.8, 17 @ 1.5 fps (10.7 s) 21.2,
+# 21 @ 2 fps 21.5, 17 @ 1 fps 20.8 (48 clips each, 2026-10-18). 17 @ 1.5 fps = 5 latent frames.
+n_frames: 17
+fps: 1.5
+# translations in units of the mean distance from view 0 (= identity) to the other cameras
+normalize_cam_scale: true

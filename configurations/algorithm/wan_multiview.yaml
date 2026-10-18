@@ -19,8 +19,25 @@ lr_scheduler:
 num_train_timesteps: 1000
 sample_shift: 3.0
 sample_steps: 30
-n_hist_latent: 1        # latent frame 0 (= pixel frame 0 of every view) is clean history
-p_no_hist: 0.1          # fraction of samples trained with no history (unconditional)
+n_hist_latent: 1        # test time: latent frame 0 (= pixel frame 0 of every view) is clean history
+p_no_hist: 0.1          # (v1 name, kept for old runs; the mixture below is what training uses)
+
+# camera conditioning (algorithms/wan/modules/model_multiview.py): concat | cat4d | prope | gta | camtoken
+cam_mode: concat
+
+# diffusion-forcing noise mixture (WanMultiView.sample_noise_levels); default = v1 behaviour
+noise:
+  mix: {first_frame: 0.9, rand_history: 0.0, independent: 0.0, view_history: 0.0, none: 0.1}
+  hist_noise_prob: 0.0   # prob that history is slightly noised instead of clean
+  hist_noise_max: 0.15   # max (shifted) t of noised history
+
+# text: cached UMT5 embeddings of RH20T task descriptions (scripts/rh20t/make_task_text_embeds.py)
+text:
+  enabled: false
+  embeds_path: /n/lab_storage/ydu_lab/Lab/akiruga/rh20t_meta/task_text_embeds_wan21.pt
+  dropout: 0.1           # -> "" (enables classifier-free text guidance)
+val_text_guidance: 0.0
+val_hist_guidance: 0.0
 gradient_checkpointing_rate: 0.0
 max_text_tokens: 512     # read by datasets/video_base.py (no text encoder is run here)
 

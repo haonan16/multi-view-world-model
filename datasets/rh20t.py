@@ -24,7 +24,8 @@ axis and the ray to the calibration marker on the table) are used, in random ord
 
 Cameras: rigs differ across the 7 cfgs and cameras were moved between calibrations,
 so per-view cameras are returned (and per-view Plucker raymaps). Poses are relative
-to view 0 (c2w_0 = identity), in metres. Cameras are static within an episode, so
+to view 0 (c2w_0 = identity), in metres, or with normalize_cam_scale in units of the mean
+distance from view 0 to the other cameras. Cameras are static within an episode, so
 cameras/raymaps carry no time axis.
 
 Sample keys:
@@ -34,7 +35,9 @@ Sample keys:
     c2w         [V, 4, 4]        OpenCV camera-to-world, view 0 = identity
     timestamps  [V, T] int64 ms; sync_err_ms [V, T]
     w2c_marker  [V, 4, 4]        raw calib extrinsics (for visualisation)
-    episode, cfg_id, serials (";"-joined), prompts ("")
+    episode, cfg_id, serials (";"-joined), prompts (task id, e.g. "task_0017": the
+    algorithm looks up its cached text embedding), cam_scale (translation divisor; 1 unless
+    normalize_cam_scale)
 """
 from __future__ import annotations
 
@@ -77,6 +80,8 @@ class RH20TMultiViewDataset(VideoDataset):
         self.n_views = int(cfg.n_views)
         self.calib_root = Path(cfg.calib_root)
         self.max_sync_err_ms = float(cfg.max_sync_err_ms)
+        # divide translations so the mean distance from view 0 to the other cameras is 1
+        self.normalize_cam_scale = bool(cfg.get("normalize_cam_scale", False))
         self._calib_cache: Dict[str, Dict[str, Any]] = {}
         self._calib_lock = threading.Lock()
         self._draws = 0
@@ -246,6 +251,10 @@ class RH20TMultiViewDataset(VideoDataset):
         w2c = np.stack(w2cs)
         c2w = np.linalg.inv(w2c)
         c2w_rel = torch.from_numpy(np.linalg.inv(c2w[0])[None] @ c2w).float()   # view 0 = I
+        cam_scale = 1.0
+        if self.normalize_cam_scale and len(c2w_rel) > 1:
+            cam_scale = float(c2w_rel[1:, :3, 3].norm(dim=-1).mean().clamp(min=1e-3))
+            c2w_rel[:, :3, 3] /= cam_scale
         K_ray = K.clone()
         K_ray[:, 0] *= Wr / W
         K_ray[:, 1] *= Hr / H
@@ -261,5 +270,6 @@ class RH20TMultiViewDataset(VideoDataset):
             "episode": rec["episode"],
             "cfg_id": rec["cfg_id"],
             "serials": ";".join(serials),
-            "prompts": "",
+            "prompts": rec["episode"].split("_user")[0],   # task id, e.g. "task_0017"
+            "cam_scale": cam_scale,                         # metres per normalised unit
         }

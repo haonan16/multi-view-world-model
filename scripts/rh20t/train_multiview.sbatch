@@ -14,7 +14,8 @@
 #SBATCH --requeue
 #SBATCH --open-mode=append
 # Multiview ablation on RH20T (algorithms/wan/wan_multiview.py, datasets/rh20t.py).
-#   DESIGN=tokens|tiled  NAME=<run name>  STEPS=<max steps>  [extra hydra overrides as args]
+#   DESIGN=tokens|tiled  NAME=<run name>  STEPS=<max steps>  [DATASET=rh20t_multiview_v2]
+#   [extra hydra overrides as args]
 #   RUN_DIR=<existing run dir>  continue that run from its last.ckpt (also lets a chain of
 #                               jobs, e.g. --dependency=afterany, share one run dir)
 #   WANDB_RUN_ID=<id>           log into that wandb run instead of starting a new one
@@ -70,7 +71,7 @@ srun python -m main \
   experiment=exp_video \
   algorithm=wan_multiview \
   algorithm.design=$DESIGN \
-  dataset=rh20t_multiview \
+  dataset=${DATASET:-rh20t_multiview} \
   experiment.num_nodes=${SLURM_NNODES} \
   experiment.strategy=ddp \
   experiment.training.lr=${LR:-2e-5} \
