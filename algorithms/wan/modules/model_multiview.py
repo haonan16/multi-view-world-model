@@ -19,9 +19,12 @@ Camera conditioning (cam_mode), all relative to view 0 (= identity):
             layer q <- D^T q, k <- D^-1 k, v <- D^-1 v, out <- D out on CAM_DIMS of every
             head, D = blockdiag(P, ..., P). Attention then depends on P_i P_j^-1 only.
   gta       GTA: same mechanism with the SE(3) world-to-camera matrix (no intrinsics).
-  camtoken  each view's raymap is patch-embedded into its own h x w "camera tokens" that
-            are appended to that view's frames and kept in the sequence through every
-            block (attended to like a clean extra frame, never decoded).
+  camtoken  the Plucker raymap is concatenated to the latent channels as in concat (every
+            token knows its view: all views share RoPE positions, so without this tokens
+            cannot find their own view's history), AND each view's raymap is patch-embedded
+            into its own h x w "camera tokens" that are appended to that view's frames and
+            kept in the sequence through every block (attended to like a clean extra frame,
+            never decoded).
 Weights load 1:1 from Wan2.1-T2V via `MultiViewWanModel.from_t2v_pretrained`.
 """
 from functools import partial
@@ -106,7 +109,7 @@ class MultiViewWanModel(WanModel):
         assert cam_mode in CAM_MODES, cam_mode
         self.cam_mode = cam_mode
         self.cond_dim = cond_dim
-        self.extra_in = {"concat": cond_dim, "cat4d": cond_dim + 1}.get(cam_mode, 0)
+        self.extra_in = {"concat": cond_dim, "cat4d": cond_dim + 1, "camtoken": cond_dim}.get(cam_mode, 0)
         # swap self-attention for the per-token-RoPE variant (same parameters)
         for blk in self.blocks:
             old = blk.self_attn
@@ -172,7 +175,7 @@ class MultiViewWanModel(WanModel):
             t = t[:, None].expand(-1, V, -1)
 
         u = x
-        if self.cam_mode in ("concat", "cat4d"):
+        if self.cam_mode in ("concat", "cat4d", "camtoken"):
             ch = [x, cond[:, :, :, None].expand(-1, -1, -1, F_, -1, -1).to(x.dtype)]
             if self.cam_mode == "cat4d":
                 m = hist_mask if hist_mask is not None else (t == 0)

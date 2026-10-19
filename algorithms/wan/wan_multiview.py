@@ -204,8 +204,10 @@ class WanMultiView(BasePytorchAlgo):
     def sample_noise_levels(self, B, Vp, Fl):
         """Diffusion-forcing noise levels t in [0, 1] (shifted-uniform) per (sample, view,
         latent frame), from the mixture self.noise_mix:
+          single_view   latent frame 0 of ONE random view is history; everything else
+                        (every frame of the other views too) one shared t
+                        -- the test-time setting: one image of one view
           first_frame   latent frame 0 of every view is history, the rest one shared t
-                        -- the test-time setting (1 frame of history)
           rand_history  a history prefix of k = 1..F-1 latent frames, the rest one shared t
           independent   an independent t per latent frame (shared across views)
           view_history  frame 0 of every view + ALL frames of a random non-empty proper
@@ -221,7 +223,9 @@ class WanMultiView(BasePytorchAlgo):
         for i, m in enumerate(modes.tolist()):
             mode = names[m]
             t[i] = self._shift(torch.rand((), device=self.device))
-            if mode == "first_frame":
+            if mode == "single_view":
+                hist[i, int(torch.randint(Vp, ())), 0] = True
+            elif mode == "first_frame":
                 hist[i, :, 0] = True
             elif mode == "rand_history" and Fl > 1:
                 hist[i, :, :int(torch.randint(1, Fl, ()))] = True
@@ -312,7 +316,12 @@ class WanMultiView(BasePytorchAlgo):
         gt = batch["videos"].to(self.device).float()                       # B, V, T, 3, H, W
         B, V, T, _, H, W = gt.shape
         lat, cond = self.pack(batch)
-        pred = self._views(self.sample(lat, cond, self.cfg.n_hist_latent, batch=batch,
+        # history: first n_hist_latent latent frames of the first val_hist_views views
+        # (null = every view; 1 = frame 0 of view 0 only, the other views are generated)
+        hv = self.cfg.get("val_hist_views", None)
+        hm = torch.zeros(lat.shape[:2] + lat.shape[3:4], dtype=torch.bool, device=lat.device)
+        hm[:, :hv, :self.cfg.n_hist_latent] = True
+        pred = self._views(self.sample(lat, cond, batch=batch, hist_mask=hm,
                                        text_guidance=self.cfg.get("val_text_guidance", 0.0),
                                        hist_guidance=self.cfg.get("val_hist_guidance", 0.0)), B).float()
         th, tw = H // 2, W // 2                                          # 2x2 tile size
@@ -330,8 +339,9 @@ class WanMultiView(BasePytorchAlgo):
         for name, p, g in [("full", pred_full, gt), ("tile", down(pred_full, (th, tw)), gt_tile),
                            ("vae_full", vae_full, gt), ("vae_tile", down(vae_full, (th, tw)), gt_tile),
                            ("copy0_full", copy, gt)]:
-            p, g = p[:, :, 1:], g[:, :, 1:]                                   # future frames only
-            p01, g01 = (p.flatten(0, 2) + 1) / 2, (g.flatten(0, 2) + 1) / 2
+            keep = torch.ones(p.shape[1:3], dtype=torch.bool, device=p.device)
+            keep[:hv, 0] = False                                   # generated (view, frame) only
+            p01, g01 = (p[:, keep].flatten(0, 1) + 1) / 2, (g[:, keep].flatten(0, 1) + 1) / 2
             mse = ((p01 - g01) ** 2).mean(dim=(1, 2, 3)).clamp(min=1e-10)
             out[f"val/psnr_{name}"] = (-10 * torch.log10(mse)).mean()
             out[f"val/ssim_{name}"] = _ssim(p01.clamp(0, 1), g01).mean()

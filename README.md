@@ -21,6 +21,29 @@ Both get each view's camera as a Plücker raymap concatenated to the latent chan
 
 Paths in the configs and `.sbatch` files point at the Harvard FASRC cluster; change them for another machine.
 
+## v2: camera-conditioning ablation (tokens design)
+Five runs that differ only in `algorithm.cam_mode` (`algorithms/wan/modules/model_multiview.py`):
+`concat` (Plücker raymap channels), `cat4d` (origin+direction raymap, clean-history mask, frame-time
+embedding), `prope` (projective relative attention), `gta` (SE(3) relative attention), `camtoken`
+(Plücker channels + per-view camera tokens kept through every block). Shared settings
+(`dataset=rh20t_multiview_v2`): 17 frames @ 1.5 fps, cameras relative to view 0 and scale-normalised,
+cached UMT5 task-description embeddings (`scripts/rh20t/make_task_text_embeds.py`, 10% dropout for
+CFG), and a per-(view, latent frame) diffusion-forcing noise mixture (`algorithm.noise.mix`).
+History schedules: `single_view` (frame 0 of ONE view; all other views generated — the test-time
+setting), `first_frame` (frame 0 of every view), `rand_history`, `independent`, `view_history`, `none`.
+```bash
+BS=8 STEPS=10000 bash scripts/rh20t/launch_v2.sh     # 5 modes, 10k steps, each queued in both requeue partitions
+bash scripts/rh20t/launch_v2_sv.sh                    # + 5k-step fine-tune from the 10k weights, single_view-heavy mix
+# eval: 10 tasks (2 passes x 5 models) pulled by any number of workers (local GPUs and/or sbatch)
+echo "concat=concat:<ckpt>,prope=prope:<ckpt>,..." > $OUT/models.txt
+OUT=$OUT EXTRA="--hist_views 1" bash scripts/rh20t/eval_v2_worker.sh   # history = frame 0 of view 0 only
+python scripts/rh20t/build_v2_eval_viewer.py --out <viewer> \
+    --runs "guided=$OUT/guide_t2_h1,no guidance=$OUT/noguide"            # lossless PNG viewer
+```
+Eval writes per scene `pred_<model>.npy` / `gt.npy` (uint8 frames), `latent_<model>.npy` / `latent_gt.npy`
+(float16 latents), `cams.npz`, and `metrics.json`. `--text_guidance` / `--hist_guidance` set CFG scales.
+`scripts/rh20t/test_multiview_model.py` checks every cam_mode (view equivariance, relative-camera invariance).
+
 ### Data (once)
 ```bash
 sbatch scripts/rh20t/lowres_download.sbatch           # official 320×180 RGB + calibration
