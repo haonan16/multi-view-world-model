@@ -1,5 +1,0 @@
-defaults:
-  - base_algo # inherits from configurations/algorithm/base_algo.yaml
-  - _self_
-
-lr: ${experiment.training.lr}

@@ -1,277 +1,129 @@
-# Multiview video world model: views as tokens vs views tiled (RH20T)
+# 4 camera views → 64-camera light stage with Lyra 2.0
 
-Ablation of two ways to feed V calibrated camera views to one video diffusion model
-(Wan2.1-T2V-1.3B, flow matching), trained on RH20T robot episodes (4 front-facing views,
-13 frames at 3 fps, 160×320 per view):
+This branch contains only what is needed to reproduce the light-stage pipeline **up to the Lyra flights**. It takes the 4
+calibrated views of one RH20T timestep, either ground-truth frames or our multiview model's predicted frames, and
+generates 64 new views on a dome around the table with NVIDIA's [Lyra 2.0](https://github.com/nv-tlabs/lyra). Everything
+is pretrained; nothing is trained.
 
-- **tokens** — each view is VAE-encoded separately; all views' tokens share one sequence
-  (same RoPE grid per view, so views are told apart only by their camera).
-- **tiled** — the 4 views are downscaled into one 2×2 canvas of the same size (4× fewer tokens).
+What the pipeline does, in one paragraph: it lifts the 4 views to 3D with metric depth (VGGT-Omega), places 64 cameras on
+a dome around the workspace, and flies Lyra 2.0 through them. There are four short flights, one starting at each real
+camera. All 4 real views (colour, metric depth and calibrated pose) are loaded into Lyra's 3D memory on every flight, so
+what the real cameras saw is warped into each new camera and only unseen content is generated.
 
-Both get each view's camera as a Plücker raymap concatenated to the latent channels
-(zero-initialised), condition on frame 0 of every view, and predict frames 1–12.
+**Result on scenes 145 and 000 (t = 12, GT and predicted frames):**
+- 64 sharp, mutually consistent views per case, with the robot arm in every view.
+- About 8 min per case on one H100 with the 4-step DMD sampler.
+- Generated cameras stay within about 2–5 cm of their requested poses. A single long flight drifted 20–36 cm, which is
+  why the flights are short.
 
-| file | |
-|---|---|
-| `algorithms/wan/wan_multiview.py` | training / sampling / validation (`algorithm.design=tokens\|tiled`) |
-| `algorithms/wan/modules/model_multiview.py` | multiview Wan backbone (raymap channels, per-view RoPE) |
-| `datasets/rh20t.py`, `datasets/_multiview.py` | synced multiview RH20T loader, tiling helpers |
-| `configurations/{algorithm/wan_multiview,dataset/rh20t_multiview}.yaml` | configs |
-| `scripts/rh20t/` | data prep, training, inference, point clouds, viewers |
+The flights can be viewed with the flight viewer used in the project
+(`/n/lab_storage/ydu_lab/Lab/akiruga/lightstage_flight_viewer/index.html` on FASRC). Point-cloud fusion of the flights
+is **not** in this branch: none of our fusion attempts were good enough to keep. Lyra's own reconstructor
+(`vipe_da3_gs_recon.py` in the Lyra repo), run on one flight video at a time, gave the cleanest clouds so far.
 
-Paths in the configs and `.sbatch` files point at the Harvard FASRC cluster; change them for another machine.
+## Layout
 
-## v2: camera-conditioning ablation (tokens design)
-Five runs that differ only in `algorithm.cam_mode` (`algorithms/wan/modules/model_multiview.py`):
-`concat` (Plücker raymap channels), `cat4d` (origin+direction raymap, clean-history mask, frame-time
-embedding), `prope` (projective relative attention), `gta` (SE(3) relative attention), `camtoken`
-(Plücker channels + per-view camera tokens kept through every block). Shared settings
-(`dataset=rh20t_multiview_v2`): 17 frames @ 1.5 fps, cameras relative to view 0 and scale-normalised,
-cached UMT5 task-description embeddings (`scripts/rh20t/make_task_text_embeds.py`, 10% dropout for
-CFG), and a per-(view, latent frame) diffusion-forcing noise mixture (`algorithm.noise.mix`).
-History schedules: `single_view` (frame 0 of ONE view; all other views generated — the test-time
-setting), `first_frame` (frame 0 of every view), `rand_history`, `independent`, `view_history`, `none`.
-```bash
-BS=8 STEPS=10000 bash scripts/rh20t/launch_v2.sh     # 5 modes, 10k steps, each queued in both requeue partitions
-bash scripts/rh20t/launch_v2_sv.sh                    # + 5k-step fine-tune from the 10k weights, single_view-heavy mix
-# eval: 10 tasks (2 passes x 5 models) pulled by any number of workers (local GPUs and/or sbatch)
-echo "concat=concat:<ckpt>,prope=prope:<ckpt>,..." > $OUT/models.txt
-OUT=$OUT EXTRA="--hist_views 1" bash scripts/rh20t/eval_v2_worker.sh   # history = frame 0 of view 0 only
-python scripts/rh20t/build_v2_eval_viewer.py --out <viewer> \
-    --runs "guided=$OUT/guide_t2_h1,no guidance=$OUT/noguide"            # lossless PNG viewer
 ```
-Eval writes per scene `pred_<model>.npy` / `gt.npy` (uint8 frames), `latent_<model>.npy` / `latent_gt.npy`
-(float16 latents), `cams.npz`, and `metrics.json`. `--text_guidance` / `--hist_guidance` set CFG scales.
-`scripts/rh20t/test_multiview_model.py` checks every cam_mode (view equivariance, relative-camera invariance).
-
-### Data (once)
-```bash
-sbatch scripts/rh20t/lowres_download.sbatch           # official 320×180 RGB + calibration
-sbatch scripts/rh20t/make_null_prompt_embed.sbatch    # UMT5 embedding of "" (no captions used)
-sbatch scripts/rh20t/check_dataset_wandb.sbatch       # optional: sanity-check samples in wandb
+lightstage/
+  setup_node.sh                  one-time node setup: env, code copy, Lyra clone + patch, checkpoints
+  patch_lyra_multiview_seeds.py  1-hunk patch to Lyra: seed views are passed separately from the trajectory
+  inputs/vggt_dynamic_clouds.py  metric depth for the 4 views (VGGT-Omega + Sim(3) to the calibrated cameras)
+  rig/prep_lightstage.py         per-case rig.json: input cameras and the table plane   -> copied to /tmp/akiruga_lightstage
+  rig/table_up.py                RANSAC table plane on the VGGT-Omega cloud
+  lyra/lyra_lightstage2.py       64-camera dome + short seeded Lyra flights (the pipeline)   -> copied to /tmp/akiruga_lyra
+  lyra/lyra_lightstage.py        helpers used by it (input loading, look-at, scene captions)
+  lyra/run_lyra.sh               environment wrapper that runs a script from the Lyra-2 directory
+  lyra/dl.sh                     downloads the Lyra 2.0 checkpoints (~97 GB)
 ```
 
-### Train (4 GPUs, DDP)
-```bash
-DESIGN=tokens NAME=mv_tokens STEPS=30000 sbatch scripts/rh20t/train_multiview.sbatch algorithm.gradient_checkpointing_rate=1
-DESIGN=tiled  NAME=mv_tiled  STEPS=30000 sbatch scripts/rh20t/train_multiview.sbatch
-```
-`RUN_DIR=<run dir>` resumes from its `checkpoints/last.ckpt`, `WANDB_RUN_ID=<id>` keeps logging
-into the same wandb run, `CKPT_EVERY` sets the save interval, and `RACE=1` lets the same job be
-queued in several partitions (first to start cancels the others). Tokens needs full gradient
-checkpointing to fit in 80 GB. `scripts/rh20t/compare_runs.py <tokens_id> <tiled_id>` prints both
-runs' validation curves.
+The scripts hardcode `/tmp/akiruga_lyra`, `/tmp/akiruga_lightstage` and a few FASRC paths (listed below). `setup_node.sh`
+recreates that layout on a fresh node.
 
-### Inference and evaluation
-```bash
-OUT=<dir>
-python scripts/rh20t/infer_multiview.py --out $OUT --n 15 \
-    --tokens_ckpt <tokens.ckpt> --tiled_ckpt <tiled.ckpt>       # held-out scenes: GT / tokens / tiled + metrics.json
-python scripts/rh20t/make_compare_videos.py $OUT <viewer>/vid   # GT-vs-prediction videos per scene
-python scripts/rh20t/vggt_dynamic_clouds.py --root $OUT --out $OUT/clouds_native --native   # VGGT-Omega dynamic point clouds
-python scripts/rh20t/render_cloud_videos.py --root $OUT --clouds clouds_native --out $OUT/videos   # point-cloud videos
-python scripts/rh20t/bake_cloud_viewer.py --root $OUT --out <cloud_viewer>   # data for scripts/rh20t/viewer/index.html
-```
-`infer_multiview.sbatch` (with `VGGT=1`) runs the first and third steps on a GPU node. The
-interactive viewer is a static page: copy `scripts/rh20t/viewer/index.html` plus three.js r128
-(`three.min.js`, `OrbitControls.js`) next to the baked data and serve it with `python -m http.server`.
-VGGT-Omega is loaded from a local clone (path set at the top of `vggt_dynamic_clouds.py`).
+## Requirements
 
-### Result (30k steps, held-out validation)
-| | PSNR ↑ | SSIM ↑ | LPIPS ↓ |
-|---|---|---|---|
-| tokens | 22.0–22.8 | 0.72–0.73 | 0.080–0.090 |
-| tiled | 20.6–21.2 | 0.56–0.57 | 0.246–0.257 |
-| copy frame 0 | 25.9 | — | 0.055 |
+- One or two 80 GB GPUs. Lyra uses about 68 GB per process. Tested on H100.
+- The packed conda env `/n/netscratch/ydu_lab/Lab/akiruga/envs/test2.tar.zst`: Python 3.12, torch 2.9 cu129,
+  transformer_engine, flash-attn, megatron-core, MoGe.
+- VGGT-Omega code at `/n/lab_storage/ydu_lab/Lab/akiruga/vggt-omega`, with checkpoint `facebook/VGGT-Omega`
+  `vggt_omega_1b_512.pt` in the HF cache `/n/netscratch/ydu_lab/Lab/akiruga/hub`. Only needed for the input step.
+- About 100 GB of local `/tmp` for the Lyra checkpoints.
 
-Tokens wins at every checkpoint and at equal compute; neither model yet beats copying frame 0.
+Always set `PYTHONNOUSERSITE=1`, because `~/.local` packages leak in otherwise.
 
----
+## Inputs
 
-# Clean training code — Model F (5B) and the 1.3B R1 ablations
+Per held-out scene, in `ROOT=/n/netscratch/ydu_lab/Lab/akiruga/mv_infer/v1_heldout15/<scene>/`:
+- `gt.npy`, `pred_tokens.npy`, `pred_tiled.npy`: uint8 `[V=4, T=13, H=160, W=320, 3]`.
+- `cams.npz`: `intrinsics` (K at 160×320) and `c2w` (OpenCV camera-to-world, metres, view 0 = identity).
 
-This repo is forked from [Boyuan Chen](https://boyuan.space/)'s research
-template [repo](https://github.com/buoyancy99/research-template).
-By its MIT license, you must keep the above sentence in `README.md`
-and the `LICENSE` file to credit the author.
+These come from `scripts/rh20t/infer_multiview.py` on the `multiview-wan` branches. The predictions need the multiview
+model code, which is not part of this branch; the GT frames and cameras are RH20T data.
 
-The template's original project instructions (cluster setup, checkpoint download, etc.) are
-preserved verbatim in **`README_TEMPLATE.md`**.
+Metric depth for those views (step 1 below) goes to `ROOT/clouds_native/<scene>/<source>/{dc.png, color.jpg, meta.json}`.
+That's a 16-bit depth atlas at 368×720 plus a colour atlas, and per view and frame the K, the camera-to-world `M` in the
+calibrated frame, and the depth range.
 
----
-
-Branch `clean-training-code-aug-4`, cut **2026-08-04** from `origin/original-boyuan-code`
-(`58d279d`) and reduced to **only the code needed to train**:
-
-* **Model F** — 5B Wan2.2 MoT-concat geometry model, at its best checkpoint (cumulative
-  step 2500, "eff-2500")
-* **the 1.3B R1 ablations** — M_full / M_noNVS / M_noDepth / M_noPose
-
-Nothing here is for evaluation, reporting, dataset conversion, or the other model variants.
-
-### Where the file lists live
-
-| file | what it is |
-|---|---|
-| **`metafiles/PYTHON_CLOSURE.txt`** | the **50 Python files** a training run actually loads (flat list) |
-| `metafiles/APPLIED_FILES.txt` | all 100 files layered onto the base commit — Python + YAML + asset + scripts |
-| `TRAINING_CODE_TRACE.md` | the derivation, the per-model breakdown, and the provenance audit |
-
-`metafiles/PYTHON_CLOSURE.txt` is generated, not hand-maintained — regenerate or re-check after any edit:
+## Steps
 
 ```bash
-python scripts/list_training_closure.py .            # the closure (should stay at 50)
-python scripts/list_training_closure.py . --unused   # .py present but never imported
+# 0. node setup (once per node), from the repo root
+bash lightstage/setup_node.sh
+PY=/tmp/akiruga_envs/test2/bin/python; export PYTHONNOUSERSITE=1
+
+# 1. metric depth of the 4 views (VGGT-Omega, aligned to the calibrated cameras)
+ROOT=/n/netscratch/ydu_lab/Lab/akiruga/mv_infer/v1_heldout15
+$PY lightstage/inputs/vggt_dynamic_clouds.py --root $ROOT --out $ROOT/clouds_native --native
+
+# 2. per-case rig: input cameras + table plane  -> /tmp/akiruga_lightstage/cases/<scene>_<src>_t12/rig.json
+cd /tmp/akiruga_lightstage
+CASES=145:gt,145:pred_tokens,145:pred_tiled,000:gt,000:pred_tokens,000:pred_tiled $PY prep_lightstage.py
+
+# 3. Lyra flights (one process per GPU; the model loads once per process)
+cd /tmp/akiruga_lyra
+SCRIPT=lyra_lightstage2.py ./run_lyra.sh 0 --cases 145_gt_t12 145_pred_tokens_t12 145_pred_tiled_t12 --use_dmd &
+SCRIPT=lyra_lightstage2.py ./run_lyra.sh 1 --cases 000_gt_t12 000_pred_tokens_t12 000_pred_tiled_t12 --use_dmd &
+wait
 ```
 
-`--unused` should report exactly two: `algorithms/common/base_algo.py` (kept from the
-template, unused by these runs) and the tracer itself.
+Output per case in `/tmp/akiruga_lyra/out2/<case>/`:
+- `rig2.json`: the 64 dome cameras (OpenCV c2w, metres, calibrated frame), the target point, up vector and radius.
+- `flight_k/video.mp4`: Lyra's output for flight k, 416×832 at 16 fps, 81–241 frames.
+- `flight_k/traj.npz`: the requested camera for every frame (`w2c`, `intrinsics`, and `base`, the re-basing transform
+  that makes real view k the identity).
+- `flight_k/stage_frames.json`: which frame of the flight lands on which of the 64 dome cameras.
+- `frames/ls_000..063.png`: the 64 light-stage images.
 
-## What's in it
+`/tmp` is node-local and is lost when the job ends, so copy `out2/` somewhere permanent.
 
-| | count |
-|---|---|
-| Python files reachable from `main.py` | **50** (was 108 before pruning) |
-| Hydra YAML | 43 |
-| launch scripts | 6 |
-| binary asset | 1 (`datasets/geometry_verification/aria/ase_undistort_maps_portrait.npz`) |
+## How it works
 
-Verified after pruning: the package chain imports, and both configs compose (`exit 0`).
+**Rig** (`make_rig` in `lyra_lightstage2.py`):
+- 64 cameras: 3 rings × 20 at 20 / 40 / 60° elevation, plus 4 at 75°.
+- Radius 1.15 m around a target 0.20 m above the table, all looking at the target. "Up" is the table normal from step 2.
+- Earlier versions aimed just above the table at the real cameras' radius (about 0.84 m). That put the arm out of frame,
+  or a camera inside the robot.
 
-```
-algorithms/
-  common/            base_pytorch_algo.py            (+ base_algo.py, unused by these runs)
-  wan/
-    wan_t2v_ray_depth_mot_concat_5b.py               <- trained Model F
-    wan_t2v_ray_depth_mot_concat_rebuttal.py         <- trained the 1.3B ablations
-    modules/  model_ray_depth_mot_concat_5b.py  (5B DiT)
-              model_ray_depth_mot_concat.py     (1.3B DiT)
-              model.py attention.py t5.py tokenizers.py vae.py vae_v2.py
-    utils/    fm_solvers.py fm_solvers_unipc.py
-datasets/    mixture.py video_base.py _scale_norm.py _crop_utils.py
-             _geometry_constants.py _caption_cache.py aria_new.py
-             + 13 subset loaders (14 subsets: bedlam.py serves bedlam and bedlam2)
-experiments/ exp_base.py exp_video.py
-utils/       7 helpers
-configurations/  algorithm/ cluster/ dataset/ experiment/
-scripts/     6 sbatch launchers
-```
+**Flights** (`assign`, `flight`):
+- One flight per real view, covering the dome cameras nearest to it in azimuth.
+- Frame 0 is the real camera. A lead-in (position lerp + rotation slerp) reaches the first dome camera, then the path goes
+  ring by ring, serpentine in azimuth, along the dome surface.
+- Consecutive frames are at most 3° apart in position or rotation.
+- Length is padded to 1 + 80k frames, because Lyra generates in 80-frame chunks.
 
-### Pruning applied to five eager registries
+**Seeding** (`run_flight`):
+- All 4 real views go into Lyra's multiview spatial cache (`--multiview_ids 0 1 2 3`), with the flight's own view first.
+- Each seed is its VGGT-Omega image crop, its metric depth and its calibrated pose. The world is re-based so the flight's
+  real view is the identity.
+- Depth is already metric, so `--pose_scale 1.0 --no-use_moge_scale`.
+- Other settings: `--num_retrieval_views 4`, resolution 416×832, `--use_dmd` (4-step DMD LoRA), default seed.
+- Per-scene text prompts are in `lyra_lightstage.CAPTIONS`; new scenes need one.
+- Vanilla Lyra can only seed from frames of the trajectory itself. `patch_lyra_multiview_seeds.py` makes
+  `run_lyra2_sample()` take the seeds from `mv_video` / `mv_depth` / `mv_w2c` / `mv_K` in the data batch instead.
+  It's applied by `setup_node.sh` to Lyra commit `9fffc9a`.
 
-These imported their whole package regardless of the run, which is why the boot set was
-108 files. Each was trimmed to the two model classes / 14 subsets actually used:
+## Notes
 
-* `algorithms/wan/__init__.py` — 17 wrappers → 2
-* `experiments/exp_video.py` — the `algorithms.wan` + `datasets.*` import blocks and both
-  `compatible_algorithms` / `compatible_datasets` registries
-* `datasets/__init__.py` — emptied (it was only a convenience re-export)
-* `datasets/mixture.py` — 22 loaders → 14
-* `experiments/__init__.py` — dropped the `process_data` task, which pulled in the robot
-  datasets, `algorithms/cogvideo/**`, and three `utils` modules
-
-## Reproducing Model F (eff-2500)
-
-`scripts/launch_5b_F_eff2500_16node.sbatch`
-
-Rebuilt from the **authoritative record** — the resolved overrides of job `33283037`
-(`…/vwm_train_runs/s5bF_Aresume14_64g_33283037/.hydra/overrides.yaml`) — *not* from the
-launch script that was on disk in August, which had drifted to `batch_size=4` /
-`gradient_checkpointing_rate=0.50` for a later resume.
-
-| | eff-2500 (correct) | the drifted script |
-|---|---|---|
-| `batch_size` | **16** → global batch **1024** | 4 → global batch 256 |
-| `gradient_checkpointing_rate` | **0.925** | 0.50 |
-
-Also note `configurations/experiment/exp_video.yaml` defaults
-`accumulate_grad_batches: 4`; the run overrides it to **1**. Omit that override and you
-silently get global batch 4096.
-
-**F is a warm-start chain, not a single run.** Each hop is weights-only, so each resets the
-AdamW state and re-runs the 1000-step LR warmup — you must replay all three:
-
-```
-A-best  s5bA_perclip_32g_30557574/checkpoints/epoch=0-step=2000.ckpt
-  -> F 32852495   cum step 1000
-  -> F 33023613   cum step 2000
-  -> F 33283037   cum step 2500   <- F-best
-```
-
-```bash
-export HF_HOME=/path/to/hf-cache
-export ASE_DATA_ROOT=/path/to/ase/scenes
-TUNED_CKPT=/path/to/previous/hop/last.ckpt \
-  sbatch scripts/launch_5b_F_eff2500_16node.sbatch
-```
-
-16 nodes × 4 H200. Scale normalisation is **per-clip** (`scale_preserving=false`);
-`dataset=mixture_parallax14` supplies only the 14-subset roster — scheme-C parallax is *not*
-active. Task split: NVS (`[2,3]`) for `re10k` + `dl3dv_colmap`; the 12 synthetic subsets are
-depth+pose only (`[1]`).
-
-## Reproducing the 1.3B R1 ablations
-
-```
-scripts/launch_13b_tta_re10k_F_1node.sbatch        M_full
-scripts/launch_13b_ablation_noNVS_1node.sbatch     M_noNVS
-scripts/launch_13b_ablation_noDepth_1node.sbatch   M_noDepth
-scripts/launch_13b_ablation_noPose_1node.sbatch    M_noPose
-scripts/launch_13b_tartanair_F_1node.sbatch        TartanAir-only 1.3B reference
-```
-
-1 node × 2 GPUs, bs4, `gradient_checkpointing_rate=1.0` (0.50 OOMs on 80 GB H100),
-`gradient_clip_val` must stay **null** — stock Lightning FSDP rejects norm clipping and only
-the 5B class carries the custom override. 240×320, raymap 30×40, 50 frames.
-
-Each variant removes its modality as **both target and input** — zeroing the loss weight alone
-is not enough, because the noised ground truth still reaches the other tasks through shared
-attention:
-
-| variant | tartanair | re10k | env flag |
-|---|---|---|---|
-| M_full | `[0,1,2,3,4]` | `[0,1,2,3]` | — |
-| M_noNVS | `[1]` | `[1]` | `REBUTTAL_RGB_CONTEXT_ONLY=1` |
-| M_noDepth | `[0,1,2,3]` | `[0,1,2,3]` | `REBUTTAL_DROP_DEPTH=1` |
-| M_noPose | `[0,1,4]` | `[0]` | `REBUTTAL_DROP_RAYMAP=1` |
-
-### Fixed here: the `weight_type` footgun
-
-`configurations/dataset/mixture_tartanair_re10k.yaml` shipped `weight_type: relative` in the
-working repo. `relative` multiplies each weight by dataset size — TartanAir 362 records vs
-RE10K 65,642 → **~0.5% / 99.5%**, which starves depth (only TartanAir has it) and makes the
-ablations uninterpretable. The training runs passed `absolute` on the CLI, so they were fine;
-**the YAML default is corrected to `absolute` on this branch.**
-
-### Provenance caveat
-
-The evaluated ablation checkpoints were trained from a *different* working copy —
-`/n/holylfs05/LABS/rcai_lab/Lab/video_model/test-time/video_world_model_optim_efficiency_latest`,
-under `kempner_rcai_lab` (jobs 35013525 / 35014222 / 35014234). The files here are byte-identical
-to that checkout **except** `wan_t2v_ray_depth_mot_concat_rebuttal.py`, which carries ~90 lines
-added afterwards for checkpoint loading and subclass plumbing (`classes_to_shard` became a
-classmethod using `cls.attention_block_cls`, which is `WanAttentionBlock` here, so FSDP wraps
-identically). Noise scheduling, `DEFAULT_P`, `subset_settings`, `_masked_mean`, the loss terms
-and the `REBUTTAL_*` gates are unchanged. That is a code-reading conclusion — nothing has been
-re-trained to confirm it empirically.
-
-## Environment
-
-`requirements.txt` is the template's original list; `requirements_cur.txt` is a freeze of the
-`test2` conda env these models actually trained under (it contains absolute paths — treat it as
-a record, not something to `pip install -r` verbatim).
-
-## Verifying a change didn't break composition
-
-```bash
-export HF_HOME=/path/to/hf-cache ASE_DATA_ROOT=/path/to/ase/scenes
-python -m main --cfg job --resolve experiment=exp_video \
-  algorithm=wan_t2v_ray_depth_mot_concat_5b dataset=mixture_parallax14 \
-  dataset.scale_preserving=false cluster=seas_h200 +name=probe
-python -m main --cfg job --resolve experiment=exp_video \
-  algorithm=wan_t2v_ray_depth_mot_concat_rebuttal dataset=mixture_tartanair_re10k \
-  cluster=fas_high +name=probe
-```
-
-Both must exit 0. Data roots live in `configurations/dataset/*.yaml` and point at FASRC
-netscratch paths — repoint them for your site.
+- The full 35-step sampler (drop `--use_dmd`) is sharper, but on scene 145 it invented a much larger robot arm of the
+  wrong design, and it takes about 9 min per 80 frames. DMD was used for all results.
+- On a shared node, kill any GPU reservation **by PID**. `pkill -f <pattern>` also kills your own shell when the pattern
+  appears in its command line.
