@@ -18,6 +18,6 @@ new = """    multiview_data = None
         }
     elif getattr(args, "multiview_ids", None):
         multiview_data = {"""
-if "mv_video" in s: print("already patched")
+if "\"mv_video\" in data_batch" in s: print("already patched")
 else:
     assert old in s, "unexpected Lyra version"; open(p, "w").write(s.replace(old, new)); print("patched", p)
