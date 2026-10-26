@@ -4,7 +4,7 @@
 # Any number of workers (local GPUs, requeue jobs) can run at once: a task is claimed by an
 # atomic mkdir of $OUT/claims/<pass>__<model>; a claim older than STALE_MIN without a result
 # (e.g. a preempted job) is taken over. Done = <pass>/<model>/metrics.json exists.
-#   OUT=DIR [N=25] [EXTRA="--hist_views 1"] bash scripts/rh20t/eval_v2_worker.sh             (local; set CUDA_VISIBLE_DEVICES)
+#   OUT=DIR [N=25] [EXTRA="--hist_views 1"] [PASSES=guide_t2_h1] bash scripts/rh20t/eval_v2_worker.sh             (local; set CUDA_VISIBLE_DEVICES)
 #   OUT=DIR sbatch -p gpu_requeue -A ydu_lab scripts/rh20t/eval_v2_worker.sh
 # Models: $OUT/models.txt = label=cam_mode:ckpt,...
 #SBATCH -J mvv2_evalw
@@ -24,7 +24,7 @@ OUT=${OUT:?set OUT}; N=${N:-25}; STALE_MIN=${STALE_MIN:-40}
 [ "${SLURM_JOB_NAME:-}" = mvv2_evalw ] && ME=$SLURM_JOB_ID || ME=$(hostname):$$
 declare -A ARGS=([noguide]="" [guide_t2_h1]="--text_guidance 2 --hist_guidance 1")
 mkdir -p $OUT/claims
-for pass in noguide guide_t2_h1; do
+for pass in ${PASSES:-noguide guide_t2_h1}; do
   for spec in $(tr ',' ' ' < $OUT/models.txt); do
     m=${spec%%=*}; dst=$OUT/$pass/$m; c=$OUT/claims/${pass}__$m
     [ -f $dst/metrics.json ] && continue

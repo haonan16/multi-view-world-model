@@ -1,0 +1,15 @@
+defaults:
+  - rh20t_multiview_v2
+  - _self_
+
+# v2 + RH20T human demonstrations (same rigs/calibration, no robot) mixed into training.
+# Humans do the tasks ~4x faster than the robot (median 9.6 s vs 42 s), so human clips are
+# sampled at 3 fps (17 frames = 5.3 s; ~93% of demos long enough, vs ~36% at 1.5 fps).
+# Demos still shorter than the window are dropped. Robot clips stay at 1.5 fps.
+# Validation / test stay robot-only unless eval_kinds says otherwise.
+include_human: true
+human_fps: 3.0
+human_weight: 0.5        # fraction of training clips from human episodes
+eval_kinds: robot        # robot | human | both
+# own records cache: the default one is keyed by data_root only (robot-only records)
+records_manifest: /n/netscratch/ydu_lab/Lab/akiruga/records_manifests/rh20t_lowres_mv_human_17f1.5fps_h3fps.json

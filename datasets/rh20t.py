@@ -22,6 +22,17 @@ View choice: in-hand cameras are excluded (they move); of the synchronisable sta
 cameras, the n_views facing the workspace most directly (smallest angle between optical
 axis and the ray to the calibration marker on the table) are used, in random order.
 
+Human demonstrations (`<episode>_human`, same rigs and calibration, no robot; cfg1-6) are
+included with `include_human` (default off). They are much shorter than robot episodes, so
+ones shorter than the clip window (metadata start/end) are dropped at record time.
+Human clips can be sampled at their own frame rate `human_fps` (default: `fps`): people do
+the same tasks ~4x faster than the robot (median demo 9.6 s vs 42 s), so a higher rate both
+keeps most demos long enough and brings motion per frame closer to the robot clips.
+`human_weight` sets the fraction of TRAINING draws that come from human episodes (null =
+their natural share); `eval_kinds` (robot | human | both, default robot) picks which
+episodes the test split serves, so validation stays comparable with robot-only runs.
+Records carry "human": bool; samples carry "is_human".
+
 Cameras: rigs differ across the 7 cfgs and cameras were moved between calibrations,
 so per-view cameras are returned (and per-view Plucker raymaps). Poses are relative
 to view 0 (c2w_0 = identity), in metres, or with normalize_cam_scale in units of the mean
@@ -74,7 +85,8 @@ def marker_angle_deg(w2c: np.ndarray) -> float:
 
 
 class RH20TMultiViewDataset(VideoDataset):
-    """One record per robot episode with >= n_views calibrated cameras."""
+    """One record per robot (optionally also human-demo) episode with >= n_views
+    calibrated cameras."""
 
     def __init__(self, cfg, split: str = "training"):
         self.n_views = int(cfg.n_views)
@@ -85,7 +97,19 @@ class RH20TMultiViewDataset(VideoDataset):
         self._calib_cache: Dict[str, Dict[str, Any]] = {}
         self._calib_lock = threading.Lock()
         self._draws = 0
+        self.include_human = bool(cfg.get("include_human", False))
+        self.human_fps = float(cfg.get("human_fps", None) or cfg.fps)
         super().__init__(cfg, split)
+        if split != "training":
+            kinds = str(cfg.get("eval_kinds", "robot"))
+            keep = {"robot": (False,), "human": (True,), "both": (False, True)}[kinds]
+            self.records = [r for r in self.records if r.get("human", False) in keep]
+        hw = cfg.get("human_weight", None)
+        self.human_weight = float(hw) if (hw is not None and split == "training") else None
+        self._kind_idx = {k: [i for i, r in enumerate(self.records) if r.get("human", False) == k]
+                          for k in (False, True)}
+        if self.human_weight is not None and not all(self._kind_idx.values()):
+            self.human_weight = None   # only one kind present
 
     # ---- records ----
 
@@ -95,8 +119,8 @@ class RH20TMultiViewDataset(VideoDataset):
         for c in cfgs:
             d = self.data_root / f"RH20T_cfg{c}"
             if d.is_dir():
-                out += sorted(p for p in d.iterdir()
-                              if p.name.startswith("task_") and "_human" not in p.name)
+                out += sorted(p for p in d.iterdir() if p.name.startswith("task_")
+                              and (self.include_human or "_human" not in p.name))
         return out
 
     def _load_calib(self, cfg_id: int, ts: int):
@@ -125,14 +149,17 @@ class RH20TMultiViewDataset(VideoDataset):
     def _load_records(self) -> List[Dict[str, Any]]:
         min_rating = self.cfg.get("min_rating", None)
         test_frac = float(self.test_percentage)
-        n_skip = {"no_meta": 0, "rating": 0, "few_cams": 0}
+        n_skip = {"no_meta": 0, "rating": 0, "few_cams": 0, "too_short": 0}
+        clip_ms = {k: 1000.0 / f * (self.n_frames - 1)
+                   for k, f in ((False, self.fps), (True, self.human_fps))}
 
         def scan(ep):   # -> (record | None, skip reason | None); I/O bound -> threads
             try:
                 meta = json.loads((ep / "metadata.json").read_text())
             except (FileNotFoundError, ValueError):
                 return None, "no_meta"
-            if min_rating is not None and meta.get("rating", 0) < min_rating:
+            human = ep.name.endswith("_human")
+            if not human and min_rating is not None and meta.get("rating", 0) < min_rating:
                 return None, "rating"
             cfg_id = int(ep.parent.name.replace("RH20T_cfg", ""))
             calib = self._load_calib(cfg_id, meta["calib"])
@@ -142,6 +169,13 @@ class RH20TMultiViewDataset(VideoDataset):
                     and (p / "color" / "timestamps.npy").exists()]
             if len(cams) < self.n_views:
                 return None, "few_cams"
+            if human:   # often shorter than the clip window; judge by the recorded frames
+                spans = []                      # (metadata start/end mark a shorter segment)
+                for c in cams:
+                    t = np.load(ep / f"cam_{c}" / "color" / "timestamps.npy")
+                    spans.append(float(t[-1] - t[0]) if len(t) >= 2 else 0.0)
+                if sorted(spans)[-self.n_views] < clip_ms[True]:   # n_views cams must cover it
+                    return None, "too_short"
             # held-out split by a stable hash of the episode name
             is_test = (zlib.crc32(ep.name.encode()) % 10000) < test_frac * 10000
             if (self.split == "training") == is_test:
@@ -149,7 +183,8 @@ class RH20TMultiViewDataset(VideoDataset):
             return {
                 "episode": ep.name, "ep_dir": str(ep), "cfg_id": cfg_id,
                 "calib_ts": int(meta["calib"]), "rating": int(meta.get("rating", -1)),
-                "cams": cams, "fps": float(self.fps), "caption": "",
+                "cams": cams, "fps": self.human_fps if human else float(self.fps),
+                "caption": "", "human": human,
                 "height": self.height, "width": self.width,
             }, None
 
@@ -185,7 +220,9 @@ class RH20TMultiViewDataset(VideoDataset):
                 ts[s] = t.astype(np.int64)
         if len(ts) < self.n_views:
             return None
-        step = 1000.0 / self.fps
+        # human clips may use their own rate (the kind decides, not rec["fps"]: older
+        # robot-only manifests were written under a different fps)
+        step = 1000.0 / (self.human_fps if rec.get("human", False) else self.fps)
         dur = step * (self.n_frames - 1)
         # the window only has to be covered by the views we pick, not by every camera
         for _ in range(8):
@@ -213,13 +250,21 @@ class RH20TMultiViewDataset(VideoDataset):
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         # Episodes can fail (dropped frames, short overlap); resample a new one rather
         # than raise -- this dataset is used directly, without MixtureDataset's guard.
+        if self.human_weight is not None:   # draw the episode kind first, then an episode
+            rng = self._rng(idx)
+            pool = self._kind_idx[bool(rng.random() < self.human_weight)]
+            idx = pool[int(rng.integers(len(pool)))]
         for attempt in range(20):
             rec = self.records[idx]
             rng = self._rng(idx)
             plan = self._plan_clip(rec, rng)
             if plan is not None:
                 return self._build_sample(rec, *plan)
-            idx = int(rng.integers(len(self.records)))
+            if self.human_weight is not None:   # retry within the same kind
+                pool = self._kind_idx[bool(rec.get("human", False))]
+                idx = pool[int(rng.integers(len(pool)))]
+            else:
+                idx = int(rng.integers(len(self.records)))
         raise RuntimeError("RH20T: 20 consecutive episodes had no synchronisable window")
 
     def _build_sample(self, rec, serials, ok) -> Dict[str, Any]:
@@ -271,5 +316,6 @@ class RH20TMultiViewDataset(VideoDataset):
             "cfg_id": rec["cfg_id"],
             "serials": ";".join(serials),
             "prompts": rec["episode"].split("_user")[0],   # task id, e.g. "task_0017"
+            "is_human": bool(rec.get("human", False)),
             "cam_scale": cam_scale,                         # metres per normalised unit
         }

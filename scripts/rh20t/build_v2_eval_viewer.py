@@ -29,9 +29,11 @@ def load_report(d):
         return rep, {r: d for r in ["gt"] + [f"pred_{m}" for m in rep["ckpt"]]}
     parts = sorted(p for p in d.iterdir() if (p / "metrics.json").exists())
     order = ["concat", "cat4d", "prope", "gta", "camtoken"]
-    parts.sort(key=lambda p: order.index(p.name) if p.name in order else len(order))
+    base = lambda p: p.name.removesuffix("_sv")                    # concat_sv sorts with concat
+    parts.sort(key=lambda p: (order.index(base(p)) if base(p) in order else len(order), p.name))
     reps = [json.loads((p / "metrics.json").read_text()) for p in parts]
     rep = {"scenes": reps[0]["scenes"], "ckpt": {}, "mean": {}, "guidance": reps[0].get("guidance", {}),
+           "hist_views": reps[0].get("hist_views"),
            "per_scene": {s: {} for s in reps[0]["scenes"]}}
     src = {"gt": parts[0]}
     for p, r in zip(parts, reps):
@@ -45,8 +47,11 @@ def load_report(d):
 
 
 def write_rows(job):
-    srcs, scene, dst, rows = job
+    srcs, scene, dst, rows, hv = job
     dst.mkdir(parents=True, exist_ok=True)
+    gt = np.load(srcs["gt"] / scene / "gt.npy")
+    # the model's only image input: frame 0 of the first hv views (all views if hv is None)
+    Image.fromarray(np.concatenate(list(gt[:hv, 0]), axis=1)).save(dst / "input.png")
     for r in rows:
         a = np.load(srcs[r] / scene / f"{r}.npy")                     # V, T, H, W, 3 uint8
         for t in range(a.shape[1]):
@@ -67,8 +72,13 @@ def main():
         d = Path(d)
         rep, srcs = load_report(d)
         models = list(rep["ckpt"])
+        if rep.get("hist_views"):   # copy-frame-0 would copy frames the model never sees: drop it
+            rep["mean"].pop("copy0", None)
+            for v in rep["per_scene"].values():
+                v.pop("copy0", None)
         rows = ["gt"] + [f"pred_{m}" for m in models]
-        jobs = [(srcs, s, out / f"run{ri}" / s, rows) for s in rep["scenes"]]
+        hv = rep.get("hist_views")
+        jobs = [(srcs, s, out / f"run{ri}" / s, rows, hv) for s in rep["scenes"]]
         with ThreadPoolExecutor(16) as ex:
             shapes = list(ex.map(write_rows, jobs))
         V, T, H, W, _ = shapes[0]
@@ -80,7 +90,7 @@ def main():
                            "text": tasks.get(task, ""), "metrics": rep["per_scene"][s]})
         data["runs"].append({
             "label": label, "dir": f"run{ri}", "models": models, "rows": rows,
-            "V": int(V), "T": int(T), "H": int(H), "W": int(W),
+            "V": int(V), "T": int(T), "H": int(H), "W": int(W), "hist_views": hv or int(V),
             "steps": {m: rep["ckpt"][m]["global_step"] for m in models},
             "guidance": rep.get("guidance", {}), "mean": rep["mean"], "scenes": scenes})
         print(f"{label}: {len(scenes)} scenes, {len(rows)} rows, {T} frames of {V}x{H}x{W}", flush=True)
@@ -109,9 +119,9 @@ select,button.b{font:inherit;padding:4px 10px;border:1px solid var(--line);borde
 input[type=range]{width:260px}
 .grid{display:grid;grid-template-columns:auto auto;gap:4px 10px;align-items:center}
 .grid .lab{font-weight:600;text-align:right;white-space:nowrap}
-.grid img{display:block}.pix img{image-rendering:pixelated}
+.grid img{display:block}.pix img,img.pix{image-rendering:pixelated}
 .prompt{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin:8px 0;font-size:15px}
-.load{color:var(--mut)}
+.load{color:var(--mut)}.inp{margin:8px 0}.inp img{display:block;margin-top:4px;border:2px solid var(--acc)}
 @media (max-width:800px){main{grid-template-columns:1fr}nav{max-height:240px;position:static}}
 </style></head><body>
 <header><h1>Multiview camera-conditioning ablation: held-out RH20T</h1>
@@ -121,7 +131,8 @@ input[type=range]{width:260px}
 <label>Scale <select id="scale"><option>1</option><option selected>2</option><option>3</option><option>4</option></select></label>
 <label><input type="checkbox" id="pix" checked> nearest-neighbour</label></div>
 <h3 style="margin:8px 0 0">Mean over scenes</h3><div id="mean"></div>
-<h3 style="margin:8px 0 0" id="stitle"></h3><div class="prompt" id="prompt"></div><div id="smet"></div>
+<h3 style="margin:8px 0 0" id="stitle"></h3><div class="prompt" id="prompt"></div>
+<div class="inp"><div class="mut" id="inpcap"></div><img id="inpimg" alt="model input"></div><div id="smet"></div>
 <div class="ctl"><button class="b" id="play">Pause</button>
 <input type="range" id="fr" min="0" value="0"><span id="frl"></span>
 <label>fps <select id="fps"><option>1</option><option>2</option><option selected>3</option><option>6</option></select></label>
@@ -134,7 +145,7 @@ const E=window.EVAL,$=id=>document.getElementById(id);
 let ri=0,si=0,t=0,playing=true,timer=null,imgs=[];
 const fmt=(v,k)=>k==="psnr"?v.toFixed(2):v.toFixed(3);
 function table(met,models){
-  const cols=[...models,"copy0"],ks=[["psnr","PSNR ↑",1],["ssim","SSIM ↑",1],["lpips","LPIPS ↓",-1]];
+  const cols=met.copy0?[...models,"copy0"]:models,ks=[["psnr","PSNR ↑",1],["ssim","SSIM ↑",1],["lpips","LPIPS ↓",-1]];
   let h="<table><tr><th>metric</th>"+cols.map(c=>`<th>${c==="copy0"?"copy frame 0":c}</th>`).join("")+"</tr>";
   for(const [k,n,s] of ks){const vals=models.map(m=>met[m][k]);const b=s>0?Math.max(...vals):Math.min(...vals);
     h+=`<tr><td>${n}</td>`+cols.map(c=>`<td class="${c!=="copy0"&&met[c][k]===b?"best":""}">${fmt(met[c][k],k)}</td>`).join("")+"</tr>";}
@@ -146,6 +157,11 @@ function scene(){
   const r=R(),s=r.scenes[si];nav();
   $("stitle").textContent=`Scene ${si+1}/${r.scenes.length}: ${s.episode}`;
   $("prompt").textContent="Task text: "+(s.text||"(none)");
+  const hvw=r.hist_views,sc0=+$("scale").value;
+  $("inpcap").textContent=hvw===1?"Model input: this single image (frame 0 of view 0) + the task text + all 4 cameras. Everything else below is generated."
+    :`Model input: frame 0 of all ${hvw} views + the task text + cameras.`;
+  $("inpimg").src=`${r.dir}/${s.name}/input.png`;$("inpimg").width=hvw*r.W*sc0;$("inpimg").height=r.H*sc0;
+  $("inpimg").classList.toggle("pix",$("pix").checked);
   $("smet").innerHTML=table(s.metrics,r.models);
   $("fr").max=r.T-1;const sc=+$("scale").value;
   const names={gt:"ground truth"};r.models.forEach(m=>names["pred_"+m]=m+` (step ${r.steps[m]})`);

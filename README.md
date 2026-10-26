@@ -21,6 +21,29 @@ Both get each view's camera as a Plücker raymap concatenated to the latent chan
 
 Paths in the configs and `.sbatch` files point at the Harvard FASRC cluster; change them for another machine.
 
+## Best model: tokens + PRoPE camera conditioning
+Input: frame 0 of ONE view + task text + all 4 cameras. Output: all 4 views × 17 frames (1.5 fps).
+
+| 25 held-out scenes (PSNR / SSIM / LPIPS) | robot scenes | human scenes |
+|---|---|---|
+| robot only (`train_best.sh robot`) | **17.70** / 0.628 / 0.205 | 14.95 / 0.504 / 0.331 |
+| robot + human (`train_best.sh human`) | 17.46 / **0.629 / 0.203** | **18.28 / 0.667 / 0.194** |
+
+Best overall is robot + human. Checkpoint (FASRC, 17 GB incl. optimizer state):
+`/n/lab_storage/ydu_lab/Lab/akiruga/mv_runs_v2/_eval_snapshots_sv10k/prope_svh_epoch=14-step=10000.ckpt`.
+The test split holds out episodes, not scenes, so these numbers are in-distribution settings.
+
+```bash
+bash scripts/rh20t/train_best.sh robot    # base -> single-view, 2 x 10k steps
+bash scripts/rh20t/train_best.sh human    # + robot/human 50/50 stage, 3 x 10k steps
+python scripts/rh20t/infer_multiview.py --out $OUT --n 25 --models prope=prope:<ckpt> \
+    --hist_views 1 --text_guidance 2 --hist_guidance 1 \
+    [--dataset rh20t_multiview_v2_human --eval_kinds human]          # human held-out scenes
+```
+Data: official 320×180 release (`lowres_download.sbatch`, see Data below); human demos need
+`dataset=rh20t_multiview_v2_human` (sets `include_human`, `human_fps`, `human_weight`).
+Full-resolution RH20T with depth: `RH20T_DOWNLOAD.md`.
+
 ## v2: camera-conditioning ablation (tokens design)
 Five runs that differ only in `algorithm.cam_mode` (`algorithms/wan/modules/model_multiview.py`):
 `concat` (Plücker raymap channels), `cat4d` (origin+direction raymap, clean-history mask, frame-time
@@ -34,6 +57,7 @@ setting), `first_frame` (frame 0 of every view), `rand_history`, `independent`, 
 ```bash
 BS=8 STEPS=10000 bash scripts/rh20t/launch_v2.sh     # 5 modes, 10k steps, each queued in both requeue partitions
 bash scripts/rh20t/launch_v2_sv.sh                    # + 5k-step fine-tune from the 10k weights, single_view-heavy mix
+bash scripts/rh20t/launch_v2_human.sh [mode]          # + robot/human 50/50 fine-tune from the sv weights
 # eval: 10 tasks (2 passes x 5 models) pulled by any number of workers (local GPUs and/or sbatch)
 echo "concat=concat:<ckpt>,prope=prope:<ckpt>,..." > $OUT/models.txt
 OUT=$OUT EXTRA="--hist_views 1" bash scripts/rh20t/eval_v2_worker.sh   # history = frame 0 of view 0 only

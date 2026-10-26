@@ -113,6 +113,11 @@ def main():
                          "data, task text); replaces --tokens_ckpt/--tiled_ckpt")
     ap.add_argument("--text_guidance", type=float, default=0.0)
     ap.add_argument("--hist_guidance", type=float, default=0.0)
+    ap.add_argument("--dataset", default=None,
+                    help="dataset config (default rh20t_multiview_v2 with --models, else rh20t_multiview); "
+                         "rh20t_multiview_v2_human also has the human-demo episodes")
+    ap.add_argument("--eval_kinds", default=None, choices=["robot", "human", "both"],
+                    help="which held-out episodes to sample scenes from (needs a dataset with human demos)")
     ap.add_argument("--hist_views", type=int, default=None,
                     help="history = frame 0 of only the first K views (e.g. 1: view 0 alone); "
                          "default: frame 0 of every view")
@@ -121,12 +126,12 @@ def main():
                          "(float16 [V, C, F, h, w], VAE-normalised) per scene")
     args = ap.parse_args()
     if args.models:
-        dataset = "rh20t_multiview_v2"
+        dataset = args.dataset or "rh20t_multiview_v2"
         models = [(lab, "tokens", ck, [f"algorithm.cam_mode={cm}", *V2_OVERRIDES])
                   for lab, rest in (m.split("=", 1) for m in args.models.split(","))
                   for cm, ck in [rest.split(":", 1)]]
     else:
-        dataset = "rh20t_multiview"
+        dataset = args.dataset or "rh20t_multiview"
         models = [("tokens", "tokens", args.tokens_ckpt, []), ("tiled", "tiled", args.tiled_ckpt, [])]
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -134,7 +139,8 @@ def main():
     import lpips
     lp = lpips.LPIPS(net="alex", verbose=False).cuda().eval()
 
-    ds = RH20TMultiViewDataset(load_cfg("tokens", dataset).dataset, "test")
+    ds_over = [f"dataset.eval_kinds={args.eval_kinds}"] if args.eval_kinds else []
+    ds = RH20TMultiViewDataset(load_cfg("tokens", dataset, ds_over).dataset, "test")
     idxs = np.linspace(0, len(ds) - 1, args.n).round().astype(int)
     samples, scenes = [], []
     for i in idxs:                                     # deterministic per idx in "test"
@@ -154,6 +160,7 @@ def main():
     report = {"scenes": scenes, "per_scene": {n: {} for n in scenes}, "ckpt": {}}
     report["guidance"] = {"text": args.text_guidance, "hist": args.hist_guidance}
     report["hist_views"] = args.hist_views
+    report["dataset"], report["eval_kinds"] = dataset, args.eval_kinds or "robot"
     labels = [m[0] for m in models]
     for mi, (label, design, ckpt, extra) in enumerate(models):
         algo, _, step, path = load_algo(design, ckpt, dataset, extra)
