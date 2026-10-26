@@ -17,6 +17,9 @@ Both get each view's camera as a Plücker raymap concatenated to the latent chan
 | `algorithms/wan/modules/model_multiview.py` | multiview Wan backbone (raymap channels, per-view RoPE) |
 | `datasets/rh20t.py`, `datasets/_multiview.py` | synced multiview RH20T loader, tiling helpers |
 | `configurations/{algorithm/wan_multiview,dataset/rh20t_multiview}.yaml` | configs |
+| `configurations/dataset/rh20t_multiview_v2{,_human}.yaml` | v2 data: robot only / robot + human demos |
+| `scripts/rh20t/train_best.sh` | best-model training recipe (robot or robot + human) |
+| `RH20T_DOWNLOAD.md` | full-resolution RH20T download (RGB + depth + low-dim + calib) |
 | `scripts/rh20t/` | data prep, training, inference, point clouds, viewers |
 
 Paths in the configs and `.sbatch` files point at the Harvard FASRC cluster; change them for another machine.
@@ -56,8 +59,8 @@ History schedules: `single_view` (frame 0 of ONE view; all other views generated
 setting), `first_frame` (frame 0 of every view), `rand_history`, `independent`, `view_history`, `none`.
 ```bash
 BS=8 STEPS=10000 bash scripts/rh20t/launch_v2.sh     # 5 modes, 10k steps, each queued in both requeue partitions
-bash scripts/rh20t/launch_v2_sv.sh                    # + 5k-step fine-tune from the 10k weights, single_view-heavy mix
-bash scripts/rh20t/launch_v2_human.sh [mode]          # + robot/human 50/50 fine-tune from the sv weights
+bash scripts/rh20t/launch_v2_sv.sh                    # + fine-tune from the 10k weights, single_view-heavy mix (STEPS=10000 used)
+STEPS=10000 bash scripts/rh20t/launch_v2_human.sh [mode]   # + robot/human 50/50 fine-tune from the sv weights
 # eval: 10 tasks (2 passes x 5 models) pulled by any number of workers (local GPUs and/or sbatch)
 echo "concat=concat:<ckpt>,prope=prope:<ckpt>,..." > $OUT/models.txt
 OUT=$OUT EXTRA="--hist_views 1" bash scripts/rh20t/eval_v2_worker.sh   # history = frame 0 of view 0 only
@@ -67,6 +70,18 @@ python scripts/rh20t/build_v2_eval_viewer.py --out <viewer> \
 Eval writes per scene `pred_<model>.npy` / `gt.npy` (uint8 frames), `latent_<model>.npy` / `latent_gt.npy`
 (float16 latents), `cams.npz`, and `metrics.json`. `--text_guidance` / `--hist_guidance` set CFG scales.
 `scripts/rh20t/test_multiview_model.py` checks every cam_mode (view equivariance, relative-camera invariance).
+
+### Result (single-view history, 25 held-out robot scenes, text 2 + history 1 guidance)
+| cam_mode | 5k PSNR | 10k PSNR / SSIM / LPIPS |
+|---|---|---|
+| prope | **16.83** | **17.70 / 0.628 / 0.205** |
+| gta | 16.64 | 17.56 / 0.625 / 0.208 |
+| cat4d | 16.33 | 17.27 / 0.611 / 0.215 |
+| camtoken | — | 17.24 / 0.608 / 0.214 |
+| concat | 16.44 | 17.13 / 0.600 / 0.224 |
+
+Steps are single-view fine-tune steps (after 10k base). Copy-frame-0 (25.9 dB) is not a valid
+baseline here: it copies frames of views the model never sees.
 
 ### Data (once)
 ```bash
