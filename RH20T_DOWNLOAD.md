@@ -24,7 +24,7 @@ comes from HuggingFace instead.
 
 | HF dataset repo | Files used | Contents | Size |
 |---|---|---|---|
-| [`Malak-Mansour/RH20T`](https://huggingface.co/datasets/Malak-Mansour/RH20T) | all | Full-res **RGB**, cfg1–7 (`RH20T_cfgN.part.aa…`) | 0.60 TB |
+| [`Malak-Mansour/RH20T`](https://huggingface.co/datasets/Malak-Mansour/RH20T) | all | Full-res **RGB**, cfg1–7 (split `RH20T_cfgN.part.*` for cfg1/2/4/6, single `RH20T_cfgN.tar.gz` for cfg3/5/7) | 0.60 TB |
 | [`HaojunChen/RH20T`](https://huggingface.co/datasets/HaojunChen/RH20T) | `depth/*` | Full-res **depth**, cfg1–7 (`RH20T_cfgN_depth.tar.gz.part-000…`) | 0.70 TB |
 | [`tonyfanggalaxies/RH20T`](https://huggingface.co/datasets/tonyfanggalaxies/RH20T) (official authors' upload) | `RH20T_lowdim/*`, `RH20T_calib/*` | Low-dim robot data + calibration, cfg1–7 | ~0.24 TB |
 | [`ldn060904/rh20t`](https://huggingface.co/datasets/ldn060904/rh20t) | `patch.tar.gz` only | Official calib/joint-angle **patch** for cfg1 + cfg2 | 3.7 GB |
@@ -98,6 +98,7 @@ Split parts are never joined on disk. They are streamed: `cat parts | tar x`.
 #!/bin/bash
 # usage: STAGING=... DEST=... [DELETE_AFTER=1] bash extract.sh
 set -euo pipefail
+shopt -s nullglob   # unmatched part globs expand to nothing
 : "${STAGING:?}" "${DEST:?}"; DELETE_AFTER=${DELETE_AFTER:-0}
 M=$STAGING/Malak-Mansour__RH20T
 H=$STAGING/HaojunChen__RH20T/depth
@@ -127,7 +128,7 @@ extract patch "$DEST/calib" "$L/patch.tar.gz"
 for i in 1 2 3 4 5 6 7; do extract calib_cfg$i  "$DEST/calib" "$T/RH20T_calib/RH20T_cfg$i.tar.gz";  done
 for i in 1 2 3 4 5 6 7; do extract lowdim_cfg$i "$DEST/data"  "$T/RH20T_lowdim/RH20T_cfg$i.tar.gz"; done
 for i in 1 2 3 4 5 6 7; do extract depth_cfg$i  "$DEST/data"  "$H"/RH20T_cfg${i}_depth.tar.gz.part-*; done
-for i in 1 2 3 4 5 6 7; do extract color_cfg$i  "$DEST/data"  "$M"/RH20T_cfg$i.part.*; done
+for i in 1 2 3 4 5 6 7; do extract color_cfg$i  "$DEST/data"  "$M"/RH20T_cfg$i.part.* "$M"/RH20T_cfg$i.tar.g[z]; done
 echo "ALL DONE"; du -sh "$DEST"
 ```
 
