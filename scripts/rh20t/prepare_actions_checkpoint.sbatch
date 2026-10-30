@@ -13,7 +13,7 @@
 set -euo pipefail
 REPO=/n/lab_storage/ydu_lab/Lab/haonan/projects/multi-view-world-model
 MODELS=/n/lab_storage/ydu_lab/Lab/haonan/datasets/models
-CKPT=${1:-$REPO/outputs/eval_unseen_matched/ckpts/pc_78500}
+CKPT=${1:-$REPO/outputs/eval_unseen_matched/ckpts/pc_week/checkpoint-78500}  # exporter needs checkpoint-<step>
 NAME=Wan2.1-T2V-1.3B-Diffusers
 PC="$MODELS/rh20t_pc_78500/$NAME"
 ACT="$MODELS/rh20t_pc_78500_act16/$NAME"
