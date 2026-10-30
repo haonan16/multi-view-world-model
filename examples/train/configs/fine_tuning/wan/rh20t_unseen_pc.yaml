@@ -1,0 +1,89 @@
+# RH20T unseen-view prediction, WITH point-cloud conditioning.
+# 4 views; 2 random "context" views are observed at frame 0, the other 2 are generated from
+# frame 0 on. The context views' frame-0 depth is fused into one point cloud and rendered
+# into every view; its VAE latent + coverage mask enter latent frame 0 (17 zero-init channels).
+# Warm-started from the RGB tokens baseline (outputs/rh20t_mv_tokens/checkpoint-10000).
+# Setup: scripts/rh20t/prepare_unseen_checkpoints.sbatch; depth: scripts/rh20t/download_depth.sbatch
+# Launch (2 nodes x 4 H100):
+#   sbatch -J rh20t_unseen_pc scripts/rh20t/train_multiview_h100.sbatch examples/train/configs/fine_tuning/wan/rh20t_unseen_pc.yaml
+
+models:
+  student:
+    _target_: fastvideo.train.models.wan.multiview.WanMultiViewModel
+    init_from: /n/lab_storage/ydu_lab/Lab/haonan/datasets/models/rh20t_mv_tokens_10k_pc17/Wan2.1-T2V-1.3B-Diffusers
+    trainable: true
+    design: tokens
+    point_cloud: true
+    n_hist_latent: 1      # latent frame 0 (= pixel frame 0 of every view) is clean history
+    p_no_hist: 0.1        # fraction of samples trained with no history (unconditional)
+    vae_encode_chunk: 8
+    dataset:
+      data_root: /n/netscratch/ydu_lab/Lab/akiruga/rh20t_lowres/data   # official 320x180 color
+      calib_root: /n/lab_storage/ydu_lab/Lab/haonan/datasets/rh20t/calib
+      records_cache_dir: /n/lab_storage/ydu_lab/Lab/haonan/datasets/rh20t/cache
+      cfgs: null            # null = all of 1..7
+      min_rating: null      # rating 1 = failed task; failures are still valid dynamics
+      test_percentage: 0.02
+      n_views: 4
+      n_frames: 13          # 1 + 4*3 -> 4 latent frames
+      fps: 3                # 13 frames span 4 s; at 10 Hz RH20T barely moves
+      max_sync_err_ms: 60
+      height: 160
+      width: 320
+      raymap_height: 20
+      raymap_width: 40
+      n_context_views: 2
+      depth_root: /n/lab_storage/ydu_lab/Lab/haonan/datasets/rh20t/depth
+      point_cloud: true
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.multiview_flow.MultiViewFlowMethod
+  validation_every_steps: 1000
+  validation_batches: 2
+  validation_batch_size: 2
+  validation_sampling_steps: 30
+
+training:
+  distributed:
+    num_gpus: 4           # the H100 launcher overrides num_gpus / hsdp_replicate_dim
+    sp_size: 1            # required: every rank draws its own RH20T batch
+    tp_size: 1
+    hsdp_replicate_dim: 4
+    hsdp_shard_dim: 1
+
+  data:
+    dataloader_num_workers: 12
+    train_batch_size: 4   # per GPU (H100 80GB); 3200 tokens/sample
+    seed: 1000
+
+  optimizer:
+    learning_rate: 2.0e-5
+    betas: [0.9, 0.95]
+    weight_decay: 0.05
+    lr_scheduler: constant_with_warmup
+    lr_warmup_steps: 200
+
+  loop:
+    max_train_steps: 10000
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: /n/lab_storage/ydu_lab/Lab/haonan/projects/multi-view-world-model/outputs/rh20t_unseen_pc
+    training_state_checkpointing_steps: 1000
+    checkpoints_total_limit: 2
+    resume_from_checkpoint: latest
+
+  tracker:
+    project_name: rh20t_multiview
+    run_name: rh20t_unseen_pc
+
+  model:
+    enable_gradient_checkpointing_type: full
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+
+pipeline:
+  flow_shift: 3

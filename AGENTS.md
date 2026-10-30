@@ -1,5 +1,14 @@
 # Repository Guidelines
 
+## Multi-view world model goal (Claude and Codex)
+
+Before working on this project's world model, read the shared
+[goal and scope](docs/training/rh20t_multiview.md#agreed-project-goal).
+That section records the user-confirmed objective and separates it from proposed
+implementation choices. Keep goal changes there so Claude (via `CLAUDE.md` importing
+this file) and Codex use the same source. Do not treat the existing RGB-and-raymap
+baseline as completion of the point-cloud world-model objective.
+
 ## Project Structure & Module Organization
 - Core Python package: `fastvideo/` (models, pipelines, training, distributed runtime, CLI entrypoints).
 - CUDA/custom kernels: `fastvideo-kernel/` (separate build/test flow).
