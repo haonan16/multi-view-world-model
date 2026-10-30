@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RH20T Unseen Views</title>
+<meta name="description" content="Point-cloud conditioning for generating unseen camera views in a multi-view RH20T world model: setup, results and caveats.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<!--
+  Slide deck: plain HTML, no build step. Edit a <section class="slide"> to change a slide;
+  add or remove sections to add or remove slides. Chart data lives in the <script id="curves">
+  JSON block (training curves from W&B hca/rh20t_multiview runs r33ugeb1 = point cloud, 1pqbccrb = RGB;
+  "frames" = matched evaluation, outputs/eval_unseen_matched/full/summary.json).
+  Keys: right/left/space/PageUp/PageDown, Home/End; ?print=1 lays all slides out for PDF.
+-->
+<style>
+  :root {
+    --ink: #1c2430; --muted: #5b6675; --paper: #f7f6f2; --paper-2: #ecebe4; --line: #d7d5cc;
+    --pc: #c4661c; --rgb: #2f6fb3; --dark: #18202b; --dark-ink: #eef0f2; --dark-muted: #b4bcc7;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--dark); }
+  body { font-family: 'IBM Plex Sans', Arial, sans-serif; color: var(--ink); overflow: hidden; }
+  #stage { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; transform-origin: 0 0; }
+  .slide { position: absolute; inset: 0; padding: 112px 128px 150px; background: var(--paper);
+           display: none; flex-direction: column; gap: 40px; }
+  .slide.active { display: flex; }
+  .slide.alt { background: var(--paper-2); }
+  .slide.dark { background: var(--dark); color: var(--dark-ink); }
+  h1 { font-size: 92px; line-height: 1.05; font-weight: 600; margin: 0; letter-spacing: -1px; }
+  h2 { font-size: 60px; line-height: 1.1; font-weight: 600; margin: 0; letter-spacing: -0.5px; }
+  h3 { font-size: 34px; line-height: 1.2; font-weight: 600; margin: 0; }
+  p, li { font-size: 30px; line-height: 1.45; margin: 0; }
+  .eyebrow { font-family: 'IBM Plex Mono', monospace; font-size: 24px; letter-spacing: 2px;
+             text-transform: uppercase; color: var(--pc); }
+  .dark .eyebrow { color: #f0a868; }
+  .muted { color: var(--muted); }
+  .dark .muted { color: var(--dark-muted); }
+  .mono { font-family: 'IBM Plex Mono', monospace; }
+  .row { display: flex; gap: 32px; }
+  .card { flex: 1; background: #fffef9; border: 1px solid var(--line); border-radius: 14px; padding: 36px;
+          display: flex; flex-direction: column; gap: 14px; }
+  .alt .card { background: var(--paper); }
+  .card p { font-size: 26px; color: var(--muted); }
+  .num { font-size: 26px; font-family: 'IBM Plex Mono', monospace; color: var(--pc); }
+  .footer { position: absolute; left: 128px; right: 128px; bottom: 56px; display: flex;
+            justify-content: space-between; font-size: 22px; color: var(--muted); }
+  .dark .footer { color: var(--dark-muted); }
+  table { border-collapse: collapse; width: 100%; font-size: 28px; }
+  th, td { padding: 16px 20px; border-bottom: 1px solid var(--line); text-align: right; }
+  th:first-child, td:first-child { text-align: left; }
+  th { font-weight: 600; color: var(--muted); font-size: 24px; text-transform: uppercase; letter-spacing: 1px; }
+  td.pc { color: var(--pc); font-weight: 600; }
+  td.rgb { color: var(--rgb); font-weight: 600; }
+  tr.key td { background: #fff3e6; }
+  .key-dot { display: inline-block; width: 18px; height: 18px; border-radius: 50%; margin-right: 10px;
+             vertical-align: middle; }
+  .big { font-size: 150px; font-weight: 600; line-height: 1; letter-spacing: -3px; }
+  .video-wrap { position: relative; display: flex; gap: 24px; }
+  .video-wrap video { flex: none; width: 1280px; height: 640px; object-fit: contain; cursor: pointer; border-radius: 10px; background: #000; display: block; }
+  .row-labels { flex: none; display: flex; flex-direction: column; width: 360px; }
+  .row-labels div { height: 160px; display: flex; align-items: center; font-size: 26px; line-height: 1.25; }
+  .col-labels { display: flex; margin-left: 384px; width: 1280px; }
+  .col-labels div { width: 320px; text-align: center; font-size: 24px; color: var(--muted); }
+  .col-labels .tgt { color: var(--pc); font-weight: 600; }
+  .pill { display: inline-block; padding: 6px 16px; border-radius: 999px; font-size: 22px; font-weight: 600; }
+  ul { margin: 0; padding-left: 36px; display: flex; flex-direction: column; gap: 18px; }
+  .flow { display: flex; align-items: stretch; gap: 0; }
+  .flow .card { border-radius: 0; border-left: none; }
+  .flow .card:first-child { border-left: 1px solid var(--line); border-radius: 14px 0 0 14px; }
+  .flow .card:last-child { border-radius: 0 14px 14px 0; }
+  .cams { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
+  .cam { border-radius: 12px; padding: 28px; min-height: 230px; display: flex; flex-direction: column; gap: 10px; }
+  .cam.ctx { background: #e3edf8; border: 2px solid var(--rgb); }
+  .cam.tgt { background: #fbeadb; border: 2px dashed var(--pc); }
+  .cam p { font-size: 26px; }
+  #nav { position: fixed; right: 16px; bottom: 12px; font: 14px 'IBM Plex Mono', monospace; color: #9aa3ad;
+         user-select: none; }
+  #nav button { background: none; border: 1px solid #4a5563; color: #cfd5dc; border-radius: 6px;
+                padding: 6px 12px; margin-left: 6px; cursor: pointer; font: inherit; }
+  @media print {
+    html, body { overflow: visible; height: auto; background: none; }
+    #stage { position: static; transform: none !important; width: auto; height: auto; }
+    .slide { position: relative; display: flex !important; width: 1920px; height: 1080px; page-break-after: always; }
+    #nav { display: none; }
+    @page { size: 1920px 1080px; margin: 0; }
+  }
+  body.print { overflow: visible; height: auto; }
+  body.print #stage { position: static; transform: none !important; width: auto; height: auto; }
+  body.print .slide { position: relative; display: flex; width: 1920px; height: 1080px; margin-bottom: 24px; }
+  body.print #nav { display: none; }
+</style>
+</head>
+<body>
+<div id="stage">
+
+<!-- 1 · Title -->
+<section class="slide dark" data-title="Title">
+  <div style="flex:1"></div>
+  <p class="eyebrow">RH20T multi-view world model · update</p>
+  <h1 style="max-width:1500px">Filling in unseen camera views with a point-cloud render</h1>
+  <p class="muted" style="font-size:34px;max-width:1400px">Two cameras are observed at frame 0; the model generates 4 seconds of video for all four cameras, including the two it never saw.</p>
+  <div style="flex:1"></div>
+  <div class="footer"><span>Haonan Chen · 29 October 2026</span><span>Wan2.1-T2V-1.3B · FastVideo trainer</span></div>
+</section>
+
+<!-- 2 · Task -->
+<section class="slide" data-title="Task">
+  <p class="eyebrow">The task</p>
+  <h2>Four cameras, two observed, two generated</h2>
+  <div class="cams">
+    <div class="cam ctx"><h3>Camera A</h3><p>Observed at frame 0 (RGB + depth)</p><p class="muted">Frames 1–12 generated</p></div>
+    <div class="cam ctx"><h3>Camera B</h3><p>Observed at frame 0 (RGB + depth)</p><p class="muted">Frames 1–12 generated</p></div>
+    <div class="cam tgt"><h3>Camera C</h3><p>Never observed</p><p class="muted">All 13 frames generated</p></div>
+    <div class="cam tgt"><h3>Camera D</h3><p>Never observed</p><p class="muted">All 13 frames generated</p></div>
+  </div>
+  <div class="row">
+    <div class="card"><h3>Data</h3><p>RH20T, all 7 robot configs: 12,745 usable episodes, 2% held out by episode. Static cameras only, 320×160 per view.</p></div>
+    <div class="card"><h3>Clip</h3><p>13 frames at 3 fps (4 s) per view; cameras synchronised within 60 ms. Context cameras picked at random per sample.</p></div>
+    <div class="card"><h3>Camera geometry</h3><p>Every view gets a Plücker raymap from calibration, so the model knows where each camera is.</p></div>
+  </div>
+  <div class="footer"><span>Setup</span><span>2</span></div>
+</section>
+
+<!-- 3 · Method -->
+<section class="slide alt" data-title="Method">
+  <p class="eyebrow">Two arms, same starting point</p>
+  <h2>Two models; one also gets a point-cloud input</h2>
+  <div class="flow">
+    <div class="card"><span class="num">1</span><h3>Depth</h3><p>Frame-0 sensor depth from the two context cameras (RH20T depth release).</p></div>
+    <div class="card"><span class="num">2</span><h3>Fuse</h3><p>Unproject with calibration into one coloured world point cloud.</p></div>
+    <div class="card"><span class="num">3</span><h3>Render</h3><p>Z-buffer splat into all four cameras; holes stay empty.</p></div>
+    <div class="card"><span class="num">4</span><h3>Encode</h3><p>VAE latent (16 ch) + coverage mask (1 ch) into latent frame 0.</p></div>
+    <div class="card"><span class="num">5</span><h3>Condition</h3><p>17 extra input channels, zero-initialised, so step 0 equals the RGB model.</p></div>
+  </div>
+  <div class="row">
+    <div class="card" style="border-left:6px solid var(--pc)"><h3><span class="key-dot" style="background:var(--pc)"></span>Model with point cloud</h3><p>Input: frame-0 RGB + camera raymaps + the rendered point cloud. Output: RGB video. 1 node × 4 H200, batch 4, grad. accumulation 2.</p></div>
+    <div class="card" style="border-left:6px solid var(--rgb)"><h3><span class="key-dot" style="background:var(--rgb)"></span>Model without point cloud (control)</h3><p>Input: frame-0 RGB + camera raymaps. Output: RGB video. 2 nodes × 4 A100 80 GB, batch 4. Same data, steps and global batch.</p></div>
+  </div>
+  <p class="muted" style="font-size:26px">Both: init from the 10k-step all-views baseline · 10,000 steps · lr 2e-5 · global batch 32 · ~9 h each. Both were then trained further (RGB to 32k, point cloud to 43k+).</p>
+  <div class="footer"><span>Method</span><span>3</span></div>
+</section>
+
+<!-- 4 · Headline -->
+<section class="slide" data-title="Headline">
+  <p class="eyebrow">Matched evaluation · step 10,000 · 254 held-out clips</p>
+  <h2>The point cloud helps the unseen views: +0.6 dB</h2>
+  <div class="row" style="align-items:flex-end;gap:80px">
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <span class="big" style="color:var(--pc)">+0.58 dB</span>
+      <p class="muted">PSNR on unseen views, 17.30 vs 16.72 (95% CI +0.46 to +0.71)</p>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <span class="big" style="color:var(--ink)">74%</span>
+      <p class="muted">of clips where the point-cloud model is better</p>
+    </div>
+  </div>
+  <table>
+    <tr><th style="width:46%">Metric (same clips, inputs and noise)</th><th>With point cloud</th><th>Without</th><th>Δ (95% CI)</th></tr>
+    <tr class="key"><td>Unseen views · PSNR / SSIM</td><td class="pc">17.30 / 0.572</td><td class="rgb">16.72 / 0.550</td><td>+0.58 [0.46, 0.71] / +0.021</td></tr>
+    <tr><td>Observed views · PSNR / SSIM</td><td class="pc">22.52 / 0.821</td><td class="rgb">22.41 / 0.821</td><td>+0.10 [−0.02, 0.23] / 0.000</td></tr>
+    <tr><td>Point-cloud render alone (unseen)</td><td class="pc">12.87 / 0.253</td><td>—</td><td></td></tr>
+    <tr><td>Repeat frame 0 (observed)</td><td colspan="2" style="text-align:center">26.12 / 0.895</td><td></td></tr>
+  </table>
+  <div class="footer"><span>Same training data and global batch (320k clips) for both · paired bootstrap over clips</span><span>4</span></div>
+</section>
+
+<!-- 5 · Curves -->
+<section class="slide" data-title="Training curves">
+  <p class="eyebrow">Training-time validation every 1,000 steps (16–32 clips)</p>
+  <h2>The gap opens by step 2,000 and holds</h2>
+  <div class="row" style="flex:1">
+    <div style="flex:1;display:flex;flex-direction:column;gap:12px">
+      <h3>Unseen views · PSNR (dB)</h3>
+      <svg id="chart-tgt" viewBox="0 0 800 520" style="width:100%;height:auto" aria-label="Unseen-view PSNR over training: point-cloud arm above RGB-only at every step from 2,000 on, both rising; render alone flat at 13.3 dB"></svg>
+    </div>
+    <div style="flex:1;display:flex;flex-direction:column;gap:12px">
+      <h3>Observed views · PSNR (dB)</h3>
+      <svg id="chart-ctx" viewBox="0 0 800 520" style="width:100%;height:auto" aria-label="Observed-view PSNR over training: both arms flat around 22 to 22.6 dB"></svg>
+    </div>
+  </div>
+  <div class="row" style="gap:40px;font-size:26px">
+    <span><span class="key-dot" style="background:var(--pc)"></span>Model with point cloud</span>
+    <span><span class="key-dot" style="background:var(--rgb)"></span>Model without</span>
+    <span><span class="key-dot" style="background:#8a929c"></span>Point-cloud render alone (dashed)</span>
+  </div>
+  <div class="footer"><span>W&amp;B hca/rh20t_multiview · runs r33ugeb1 and 1pqbccrb</span><span>5</span></div>
+</section>
+
+<!-- 5b · Longer training -->
+<section class="slide alt" data-title="Longer training">
+  <p class="eyebrow">Longer training · same 254 clips</p>
+  <h2>Both models keep improving; the point cloud stays ahead</h2>
+  <table>
+    <tr><th style="width:40%">Checkpoint</th><th>Training clips</th><th>Unseen PSNR / SSIM</th><th>Observed PSNR</th></tr>
+    <tr><td><span class="key-dot" style="background:var(--rgb)"></span>Without point cloud · step 10k</td><td>320k</td><td class="rgb">16.72 / 0.550</td><td>22.41</td></tr>
+    <tr><td><span class="key-dot" style="background:var(--pc)"></span>With point cloud · step 10k</td><td>320k</td><td class="pc">17.30 / 0.572</td><td>22.52</td></tr>
+    <tr><td><span class="key-dot" style="background:var(--rgb)"></span>Without point cloud · step 32k</td><td>1.02M</td><td class="rgb">18.37 / 0.644</td><td>22.80</td></tr>
+    <tr class="key"><td><span class="key-dot" style="background:var(--pc)"></span>With point cloud · step 43k</td><td>1.38M</td><td class="pc">19.08 / 0.678</td><td>22.67</td></tr>
+  </table>
+  <div class="row">
+    <div class="card"><h3>+1.7 dB from more training alone</h3><p>The model without the point cloud gained 1.66 dB on unseen views between 10k and 32k steps.</p></div>
+    <div class="card"><h3>+0.71 dB at 43k vs 32k</h3><p>CI +0.61 to +0.82; better on 83% of clips. The point-cloud run saw 35% more data, so read this as an upper bound on the gain.</p></div>
+    <div class="card"><h3>Not only where points land</h3><p>At 10k the gain is +0.65 dB on pixels the cloud covers and +0.46 dB on the rest, so the render also acts as a layout cue.</p></div>
+  </div>
+  <div class="footer"><span>The point-cloud run is still training (about +0.3 dB per 10k steps at 60k)</span><span>6</span></div>
+</section>
+
+<!-- 5c · Observed views per frame -->
+<section class="slide" data-title="Observed views">
+  <p class="eyebrow">Observed cameras · PSNR per frame · same 254 clips</p>
+  <h2>The observed views lose most at the first generated frame</h2>
+  <div class="row" style="flex:1;gap:56px">
+    <div style="flex:1.4;display:flex;flex-direction:column;gap:12px">
+      <svg id="chart-frames" viewBox="0 0 800 520" style="width:100%;height:auto" aria-label="Observed-view PSNR by frame: repeating frame 0 starts at 33 dB and falls to 22.5 dB; both models start near 26.8 dB and fall to about 20.6 dB, so the gap shrinks from 6.3 dB at frame 1 to 1.9 dB at frame 12"></svg>
+      <div class="row" style="gap:40px;font-size:26px">
+        <span><span class="key-dot" style="background:#8a929c"></span>Repeat frame 0 (dashed)</span>
+        <span><span class="key-dot" style="background:var(--pc)"></span>With point cloud · 43k</span>
+        <span><span class="key-dot" style="background:var(--rgb)"></span>Without · 32k</span>
+      </div>
+    </div>
+    <div style="flex:1;display:flex;flex-direction:column;gap:28px;justify-content:center">
+      <p><b>6.3 dB</b> behind repeating frame 0 at frame 1, which is nearly identical to frame 0.</p>
+      <p><b>1.9 dB</b> behind at frame 12: the model does not drift away over time.</p>
+      <p class="muted">RH20T scenes barely move in 4 s, so PSNR rewards copying. The model loses detail of the static scene in its first generated latent; the point cloud does not change this.</p>
+    </div>
+  </div>
+  <div class="footer"><span>Frames 1–12 of the two observed cameras (frame 0 is given)</span><span>7</span></div>
+</section>
+
+<!-- 6 · Qualitative -->
+<section class="slide alt" data-title="Example clip" style="gap:20px">
+  <p class="eyebrow">Held-out episode · task_0001_user_0009_scene_0006_cfg_0001 · step 10,000</p>
+  <h2 style="font-size:52px">Same clip, two models: both generate RGB video</h2>
+  <div class="col-labels"><div>Camera A · observed</div><div>Camera B · observed</div><div class="tgt">Camera C · unseen</div><div class="tgt">Camera D · unseen</div></div>
+  <div class="video-wrap">
+    <div class="row-labels">
+      <div>Real video</div>
+      <div>Generated by the model&nbsp;<span style="color:var(--rgb);font-weight:600">without</span>&nbsp;point cloud</div>
+      <div>Generated by the model&nbsp;<span style="color:var(--pc);font-weight:600">with</span>&nbsp;point cloud</div>
+      <div class="muted">Point-cloud render: what the second model is given</div>
+    </div>
+    <video src="assets/compare.mp4" poster="assets/compare_first.jpg" autoplay loop muted playsinline title="Click to pause or play"></video>
+  </div>
+  <div class="footer"><span>13 frames, 3 fps; grey in the render row = no point landed there · step 10,000</span><span>8</span></div>
+</section>
+
+<!-- 7 · Caveats -->
+<section class="slide" data-title="Caveats">
+  <p class="eyebrow">How far to trust this</p>
+  <h2>A real but modest gain, measured with image metrics only</h2>
+  <div class="row" style="flex:1">
+    <div class="card"><h3>One seed per arm</h3><p>The confidence intervals cover clip-to-clip variation, not training-run variation. A second seed would show how much of +0.58 dB is luck.</p></div>
+    <div class="card"><h3>PSNR rewards copying</h3><p>Scenes barely move in 4 s, so copying frame 0 scores 26.1 dB on observed views. PSNR says little about whether motion or geometry is right.</p></div>
+    <div class="card"><h3>No 3-D check yet</h3><p>Nothing yet tests whether the generated views agree with each other in 3-D, which is what the point cloud should help most.</p></div>
+  </div>
+  <div class="row">
+    <div class="card"><h3>Not yet the project goal</h3><p>The cloud is static (frame 0 only) and only fills in views. The agreed goal is a world model that takes point-cloud observations and predicts how the scene evolves.</p></div>
+  </div>
+  <div class="footer"><span>Caveats</span><span>9</span></div>
+</section>
+
+<!-- 8 · Next -->
+<section class="slide dark" data-title="Next steps">
+  <p class="eyebrow">Next steps</p>
+  <h2>Better metrics, a sharper first frame, then a dynamic cloud</h2>
+  <ul style="font-size:32px">
+    <li><b>Metrics that see motion and 3-D:</b> PSNR/LPIPS on moving pixels only, cross-view reprojection error with sensor depth, and FVD.</li>
+    <li><b>Sharper first frame:</b> condition on more history frames and test more sampling steps, to close the 6 dB gap at frame 1.</li>
+    <li><b>Point-cloud history:</b> feed clouds from several past frames, not only frame 0, as the conditioning observation.</li>
+    <li><b>Predict geometry:</b> have the model output future depth or points, so the scene evolution itself is 3-D.</li>
+    <li><b>Second seed and render ablations:</b> repeat the 10k comparison; drop the coverage mask; vary the number of context cameras.</li>
+  </ul>
+  <div class="footer"><span>Code: github.com/haonan16/multi-view-world-model</span><span>10</span></div>
+</section>
+
+</div>
+<div id="nav"><span id="count"></span><button id="prev" aria-label="Previous slide">‹</button><button id="next" aria-label="Next slide">›</button></div>
+
+<script id="curves" type="application/json">
+{
+  "steps": [1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000],
+  "pc_tgt":  [13.94, 14.85, 15.65, 15.88, 16.06, 16.68, 16.56, 16.88, 16.96, 16.91],
+  "rgb_tgt": [13.64, 14.34, 14.42, 14.54, 15.21, 15.18, 15.60, 15.63, 15.91, 16.12],
+  "render_tgt": [13.28, 13.28, 13.28, 13.28, 13.28, 13.28, 13.28, 13.28, 13.28, 13.28],
+  "pc_ctx":  [21.99, 22.04, 22.50, 22.55, 22.08, 22.33, 22.31, 22.60, 22.60, 22.64],
+  "rgb_ctx": [22.43, 22.45, 22.27, 22.40, 21.73, 22.44, 22.41, 22.36, 22.56, 22.37],
+  "frames": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+  "copy0_ctx_by_frame": [33.11, 30.13, 28.39, 27.39, 26.47, 25.67, 24.96, 24.41, 23.94, 23.46, 22.98, 22.48],
+  "pc43k_ctx_by_frame": [26.76, 25.03, 24.08, 23.40, 22.86, 22.39, 22.01, 21.69, 21.38, 21.09, 20.76, 20.54],
+  "rgb32k_ctx_by_frame": [26.83, 25.06, 24.14, 23.57, 23.05, 22.53, 22.15, 21.84, 21.49, 21.22, 20.97, 20.76]
+}
+</script>
+<script>
+(function () {
+  var SVGNS = "http://www.w3.org/2000/svg";
+  var data = JSON.parse(document.getElementById("curves").textContent);
+  function el(tag, attrs, text) {
+    var e = document.createElementNS(SVGNS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+  function chart(id, series, yMin, yMax, yStep, xs, ticks, tickLabel) {
+    xs = xs || data.steps; ticks = ticks || [1000, 4000, 7000, 10000];
+    tickLabel = tickLabel || function (s) { return (s / 1000) + "k"; };
+    var svg = document.getElementById(id), L = 70, R = 780, T = 20, B = 470;
+    var x0 = xs[0], x1 = xs[xs.length - 1];
+    var x = function (s) { return L + (s - x0) / (x1 - x0) * (R - L); };
+    var y = function (v) { return B - (v - yMin) / (yMax - yMin) * (B - T); };
+    for (var v = yMin; v <= yMax + 1e-9; v += yStep) {
+      svg.appendChild(el("line", { x1: L, x2: R, y1: y(v), y2: y(v), stroke: "#d7d5cc", "stroke-width": 1 }));
+      svg.appendChild(el("text", { x: L - 12, y: y(v) + 7, "text-anchor": "end", "font-size": 20, fill: "#5b6675",
+        "font-family": "IBM Plex Sans, Arial, sans-serif" }, v.toFixed(0)));
+    }
+    ticks.forEach(function (s) {
+      svg.appendChild(el("text", { x: x(s), y: B + 34, "text-anchor": "middle", "font-size": 20, fill: "#5b6675",
+        "font-family": "IBM Plex Sans, Arial, sans-serif" }, tickLabel(s)));
+    });
+    series.forEach(function (sr) {
+      var pts = xs.map(function (s, i) { return x(s) + "," + y(sr.values[i]); }).join(" ");
+      svg.appendChild(el("polyline", { points: pts, fill: "none", stroke: sr.color, "stroke-width": sr.dash ? 3 : 5,
+        "stroke-dasharray": sr.dash ? "10 8" : "none", "stroke-linejoin": "round" }));
+      if (!sr.dash) xs.forEach(function (s, i) {
+        svg.appendChild(el("circle", { cx: x(s), cy: y(sr.values[i]), r: 6, fill: sr.color }));
+      });
+    });
+  }
+  chart("chart-tgt", [
+    { values: data.render_tgt, color: "#8a929c", dash: true },
+    { values: data.rgb_tgt, color: "#2f6fb3" },
+    { values: data.pc_tgt, color: "#c4661c" }
+  ], 12, 18, 1);
+  chart("chart-ctx", [
+    { values: data.rgb_ctx, color: "#2f6fb3" },
+    { values: data.pc_ctx, color: "#c4661c" }
+  ], 20, 24, 1);
+  chart("chart-frames", [
+    { values: data.copy0_ctx_by_frame, color: "#8a929c", dash: true },
+    { values: data.rgb32k_ctx_by_frame, color: "#2f6fb3" },
+    { values: data.pc43k_ctx_by_frame, color: "#c4661c" }
+  ], 20, 34, 2, data.frames, [1, 4, 8, 12], function (f) { return "" + f; });
+
+  var slides = Array.prototype.slice.call(document.querySelectorAll(".slide"));
+  var stage = document.getElementById("stage"), count = document.getElementById("count");
+  var printMode = /[?&]print=1/.test(location.search);
+  if (printMode) { document.body.classList.add("print"); return; }
+  var cur = 0;
+  var m = /#(\d+)/.exec(location.hash); if (m) cur = Math.min(slides.length - 1, Math.max(0, +m[1] - 1));
+  function fit() {
+    var s = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
+    stage.style.transform = "translate(" + (window.innerWidth - 1920 * s) / 2 + "px," +
+      (window.innerHeight - 1080 * s) / 2 + "px) scale(" + s + ")";
+  }
+  function show(i) {
+    cur = Math.min(slides.length - 1, Math.max(0, i));
+    slides.forEach(function (sl, j) { sl.classList.toggle("active", j === cur); });
+    count.textContent = (cur + 1) + " / " + slides.length;
+    try { history.replaceState(null, "", "#" + (cur + 1)); } catch (e) { /* file:// or sandbox */ }
+    var v = slides[cur].querySelector("video"); if (v) { try { v.currentTime = 0; v.play(); } catch (e) {} }
+  }
+  document.addEventListener("keydown", function (e) {
+    if (["ArrowRight", "PageDown", " ", "Enter"].indexOf(e.key) >= 0) { e.preventDefault(); show(cur + 1); }
+    else if (["ArrowLeft", "PageUp", "Backspace"].indexOf(e.key) >= 0) { e.preventDefault(); show(cur - 1); }
+    else if (e.key === "Home") show(0);
+    else if (e.key === "End") show(slides.length - 1);
+  });
+  document.getElementById("prev").onclick = function () { show(cur - 1); };
+  document.getElementById("next").onclick = function () { show(cur + 1); };
+  var x0 = null;
+  document.addEventListener("touchstart", function (e) { x0 = e.touches[0].clientX; }, { passive: true });
+  document.addEventListener("touchend", function (e) {
+    if (x0 === null) return; var dx = e.changedTouches[0].clientX - x0; x0 = null;
+    if (Math.abs(dx) > 40) show(cur + (dx < 0 ? 1 : -1));
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("video"), function (v) {
+    v.addEventListener("click", function () { if (v.paused) v.play(); else v.pause(); });
+  });
+  window.addEventListener("resize", fit);
+  fit(); show(cur);
+})();
+</script>
+</body>
+</html>

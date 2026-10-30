@@ -229,7 +229,7 @@ arms keep improving with training, at about +0.75 dB per 10k steps for RGB betwe
 and 32k.
 
 On observed views neither model beats copying frame 0. The gap is 6.3 dB at frame 1 and
-1.7 dB at frame 12, so it comes from the first generated latent rather than from drift.
+1.7–1.9 dB at frame 12, so it comes from the first generated latent rather than from drift.
 
 ## Setup
 
