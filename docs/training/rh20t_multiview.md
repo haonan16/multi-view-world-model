@@ -209,23 +209,27 @@ python scripts/rh20t/summarize_unseen_eval.py rgb=outputs/eval_unseen_matched/fu
 ```
 
 Results from 2026-10-29 on all 254 val clips (`outputs/eval_unseen_matched/full/summary*.{md,json}`).
-Samples count training clips seen from the RGB tokens baseline onward:
+Every run used a global batch of 32 (the first point-cloud run: 4 GPUs x 4 x accumulation 2;
+RGB: 8 GPUs x 4). Samples count training clips seen since the RGB tokens baseline:
 
 | checkpoint | samples | unseen PSNR / SSIM | observed PSNR |
 |------------|---------|--------------------|---------------|
 | RGB, step 10,000 | 320k | 16.72 / 0.550 | 22.41 |
-| point cloud, step 10,000 | 160k | 17.30 / 0.572 | 22.52 |
+| point cloud, step 10,000 | 320k | 17.30 / 0.572 | 22.52 |
 | RGB, step 32,000 (`outputs/rh20t_unseen_rgb_cont_20261028`) | 1.02M | 18.37 / 0.644 | 22.80 |
-| point cloud, step 43,000 (`outputs/rh20t_pc_week_20261024`) | 1.06M | 19.08 / 0.678 | 22.67 |
+| point cloud, step 43,000 (`outputs/rh20t_pc_week_20261024`) | 1.38M | 19.08 / 0.678 | 22.67 |
 | copy frame 0 (observed views) | – | – | 26.12 |
 
-At matched samples, the point cloud adds +0.71 dB PSNR on unseen views (95% CI
-+0.61 to +0.82) and +0.034 SSIM. It wins on 83% of clips. The gain is about the same on
-pixels the cloud covers and pixels it does not, and it does not depend on render quality.
-The render therefore seems to act as a global layout cue rather than being copied into
-the image. On observed views neither model beats copying frame 0. The gap is 6.3 dB at
-frame 1 and 1.7 dB at frame 12, so it comes from the first generated latent rather than
-from drift.
+The matched comparison is step 10,000. There the point cloud adds +0.58 dB PSNR on
+unseen views (95% CI +0.46 to +0.71) and +0.021 SSIM, and wins on 74% of clips. The
+gain is somewhat larger on pixels the cloud covers (+0.65 dB) than on pixels it does
+not (+0.46 dB). Point cloud at 43k against RGB at 32k gives +0.71 dB (CI +0.61 to
++0.82), but the point-cloud run saw 35% more samples, so this is an upper bound. Both
+arms keep improving with training, at about +0.75 dB per 10k steps for RGB between 10k
+and 32k.
+
+On observed views neither model beats copying frame 0. The gap is 6.3 dB at frame 1 and
+1.7 dB at frame 12, so it comes from the first generated latent rather than from drift.
 
 ## Setup
 
