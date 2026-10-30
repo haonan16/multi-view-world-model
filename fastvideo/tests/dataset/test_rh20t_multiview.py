@@ -411,7 +411,7 @@ def test_action_sample_renders_tcp_at_image_centre(rh20t_tree):
     cfg = _config(rh20t_tree, actions=True, lowdim_root=rh20t_tree["lowdim_root"], raymap_height=8, raymap_width=16)
     sample = RH20TMultiViewDataset(cfg, split="train")[0]
     V, T = sample["videos"].shape[:2]
-    assert sample["actions"].shape == (V, T, 8)
+    assert sample["actions"].shape == (V, T, 8) and sample["has_actions"] is True
     assert sample["action_maps"].shape == (V, T, 4, 8, 16)
     torch.testing.assert_close(sample["actions"][..., 7], torch.full((V, T), GRIPPER_WIDTH / 100))
     tcp_blob = sample["action_maps"][:, :, 0]
@@ -420,3 +420,12 @@ def test_action_sample_renders_tcp_at_image_centre(rh20t_tree):
     assert ((rows - 3.5).abs() <= 1).all() and ((cols - 7.5).abs() <= 1).all()
     # openness channel = TCP blob x openness
     torch.testing.assert_close(sample["action_maps"][:, :, 2], tcp_blob * GRIPPER_WIDTH / 100)
+
+
+def test_action_sample_without_log_gets_zeros(rh20t_tree, tmp_path):
+    empty = tmp_path / "no_lowdim"
+    empty.mkdir()
+    cfg = _config(rh20t_tree, actions=True, lowdim_root=str(empty))
+    sample = RH20TMultiViewDataset(cfg, split="train")[0]
+    assert sample["has_actions"] is False
+    assert sample["actions"].abs().max() == 0 and sample["action_maps"].abs().max() == 0

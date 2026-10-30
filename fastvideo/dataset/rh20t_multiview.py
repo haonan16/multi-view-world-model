@@ -47,6 +47,8 @@ Sample keys:
                                  quaternion wxyz, gripper openness; every frame (the plan)
     action_maps [V, T, 4, Hr, Wr] (actions only) actions rendered into each view at raymap
                                  resolution (rh20t_actions.render_action_maps)
+    has_actions bool             (actions only) False when the episode has no usable action log
+                                 for these cameras and frames: actions / action_maps are zeros
 """
 from __future__ import annotations
 
@@ -67,7 +69,8 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset
 
-from fastvideo.dataset.rh20t_actions import load_episode_actions, render_action_maps, view_actions
+from fastvideo.dataset.rh20t_actions import (ACTION_MAP_CHANNELS, load_episode_actions, render_action_maps,
+                                             view_actions)
 from fastvideo.dataset.rh20t_depth import clean_depth, read_depth_frames, render_points, unproject
 from fastvideo.logger import init_logger
 
@@ -521,12 +524,25 @@ class RH20TMultiViewDataset(Dataset):
 
     def episode_actions(self, rec: dict[str, Any], serials: list[str], stamps: np.ndarray, K_ray: torch.Tensor,
                         Hr: int, Wr: int) -> dict[str, torch.Tensor]:
-        """Per-view end-effector trajectory at the clip's frame times and its rendering."""
+        """Per-view end-effector trajectory at the clip's frame times and its rendering. A clip
+        without a usable action log gets zeros (and has_actions False) instead of being
+        resampled, so action and no-action runs see the same clips."""
         assert self.cfg.lowdim_root is not None
-        tcp, gripper = load_episode_actions(Path(self.cfg.lowdim_root) / f"RH20T_cfg{rec['cfg_id']}" / rec["episode"])
-        actions = torch.from_numpy(np.stack([view_actions(tcp, gripper, s, t) for s, t in zip(serials, stamps)])).float()
+        V, T = stamps.shape
+        try:
+            tcp, gripper = load_episode_actions(
+                Path(self.cfg.lowdim_root) / f"RH20T_cfg{rec['cfg_id']}" / rec["episode"])
+            actions = torch.from_numpy(np.stack([view_actions(tcp, gripper, s, t)
+                                                 for s, t in zip(serials, stamps)])).float()
+        except (OSError, ValueError, KeyError) as exc:
+            logger.debug("RH20T: no actions for %s: %r", rec["episode"], exc)
+            return {
+                "actions": torch.zeros(V, T, 8),
+                "action_maps": torch.zeros(V, T, ACTION_MAP_CHANNELS, Hr, Wr),
+                "has_actions": False
+            }
         maps = torch.stack([render_action_maps(a, K_ray[v], Hr, Wr) for v, a in enumerate(actions)])
-        return {"actions": actions, "action_maps": maps}
+        return {"actions": actions, "action_maps": maps, "has_actions": True}
 
     def render_context_cloud(self, rec: dict[str, Any], ctx_serials: list[str], ok: dict[str, Any],
                              ctx_frames: list[torch.Tensor], c2w_rel: torch.Tensor,

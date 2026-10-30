@@ -10,7 +10,9 @@ the tool centre point already expressed in that camera's frame (metres), sampled
 camera's frame times. The quaternion is scalar-first; the tool +z axis points from the wrist
 to the fingertips (both checked by projecting into the colour frames, 2026-10-30).
 ``gripper.npy`` is ``{serial: {ms: {"gripper_info": [width, ...], ...}}}`` with width on a
-0..~100 scale (cfg 4 logs a constant 84).
+0..~100 scale (cfg 4 logs a constant 84). Some poses are logged as ``None`` (a few per
+episode, or all of them for some episodes) and some cameras have an empty gripper log; those
+entries are dropped.
 
 The executed end-effector trajectory stands in for the commanded actions. It covers every
 clip frame, including future ones: it is the plan the world model is conditioned on.
@@ -46,14 +48,17 @@ def load_episode_actions(episode_dir: str | Path) -> tuple[dict, dict]:
     """-> (tcp {serial: (stamps [N] int64, poses [N, 7])}, gripper {serial: (stamps [M], width [M])})."""
     d = Path(episode_dir) / "transformed"
     tcp_raw = np.load(d / "tcp.npy", allow_pickle=True).item()
-    tcp = {
-        s: (np.array([int(e["timestamp"]) for e in v], dtype=np.int64), np.array([e["tcp"] for e in v],
-                                                                                   dtype=np.float64))
-        for s, v in tcp_raw.items() if len(v)
-    }
+    tcp = {}
+    for s, entries in tcp_raw.items():
+        valid = [e for e in entries if e["tcp"] is not None and np.asarray(e["tcp"]).shape == (7, )]
+        if valid:
+            tcp[s] = (np.array([int(e["timestamp"]) for e in valid], dtype=np.int64),
+                      np.array([e["tcp"] for e in valid], dtype=np.float64))
     grip_raw = np.load(d / "gripper.npy", allow_pickle=True).item()
     gripper = {}
     for s, v in grip_raw.items():
+        if not v:
+            continue
         stamps = np.array(sorted(v), dtype=np.int64)
         widths = np.array([float(np.asarray(v[t]).item()["gripper_info"][0]) for t in stamps])
         gripper[s] = (stamps, widths)
@@ -78,6 +83,8 @@ def view_actions(tcp: dict, gripper: dict, serial: str, frame_stamps: np.ndarray
         raise ValueError(f"no TCP track for camera {serial}")
     stamps, poses = tcp[serial]
     pose = poses[nearest_index(stamps, frame_stamps, MAX_ACTION_DT_MS)]
+    if not gripper:
+        raise ValueError("no gripper log")
     g_stamps, widths = gripper.get(serial) or next(iter(gripper.values()))
     # the gripper is logged on its own clock: nearest sample, no tolerance (it changes slowly)
     width = widths[nearest_index(g_stamps, frame_stamps, np.inf)]

@@ -51,3 +51,22 @@ def test_view_actions_falls_back_to_any_gripper_clock():
     np.testing.assert_allclose(out[0], [0, 0, 2, 1, 0, 0, 0, 0.8])
     with pytest.raises(ValueError):
         view_actions(tcp, gripper, "missing", np.array([0]))
+
+
+def test_load_episode_actions_drops_none_poses_and_empty_gripper_logs(tmp_path):
+    from fastvideo.dataset.rh20t_actions import load_episode_actions
+    d = tmp_path / "transformed"
+    d.mkdir()
+    pose = np.array([0, 0, 1, 1, 0, 0, 0.0])
+    tcp = {
+        "a": [{"timestamp": 0, "tcp": pose}, {"timestamp": 100, "tcp": None}, {"timestamp": 200, "tcp": pose}],
+        "b": [{"timestamp": 0, "tcp": None}],  # no valid pose at all
+    }
+    gripper = {"a": {}, "b": {0: {"gripper_info": [40.0, 0, 1]}}}
+    np.save(d / "tcp.npy", tcp, allow_pickle=True)
+    np.save(d / "gripper.npy", gripper, allow_pickle=True)
+    tcp_out, grip_out = load_episode_actions(tmp_path)
+    assert list(tcp_out) == ["a"] and tcp_out["a"][0].tolist() == [0, 200]
+    assert list(grip_out) == ["b"]
+    # camera a has no gripper log of its own: it borrows camera b's
+    np.testing.assert_allclose(view_actions(tcp_out, grip_out, "a", np.array([0]))[0, 7], 0.4)
