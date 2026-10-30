@@ -39,6 +39,8 @@ def _write_mp4(path: Path, n_frames: int, seed: int) -> None:
 
 
 DEPTH_M = 1.2  # every depth pixel; in front of all fixture cameras
+TCP_QUAT_WXYZ = np.array([1.0, 0.0, 0.0, 0.0])
+GRIPPER_WIDTH = 50.0
 
 
 def _write_depth_mp4(path: Path, n_frames: int) -> None:
@@ -92,7 +94,7 @@ def rh20t_tree(tmp_path: Path) -> dict:
             | {"999999999999": None},
             allow_pickle=True)
 
-    depth_root = tmp_path / "depth"
+    depth_root, lowdim_root = tmp_path / "depth", tmp_path / "lowdim"
     episodes = []
     for e in range(3):
         ep = data_root / f"RH20T_cfg{CFG_ID}" / f"task_000{e + 1}_user_0016_scene_0001_cfg_000{CFG_ID}"
@@ -108,6 +110,19 @@ def rh20t_tree(tmp_path: Path) -> dict:
                 dd.mkdir(parents=True)
                 _write_depth_mp4(dd / "depth.mp4", N_VIDEO_FRAMES)
         (ep / "metadata.json").write_text(json.dumps({"calib": CALIB_TS, "rating": 2 + e}))
+        # low-dim actions: the TCP sits at the world origin (every camera looks at it), tool
+        # axis along world -z, gripper half open
+        tcp, gripper = {}, {}
+        for serial, (pos, offset, step) in cams.items():
+            stamps = (1_000_000 + offset + np.arange(0, SPAN_MS + 1, step)).astype(np.int64)
+            w2c = _look_at_w2c(pos)
+            xyz = w2c[:3, 3]  # origin in camera coordinates
+            tcp[serial] = [{"timestamp": int(t), "tcp": np.r_[xyz, TCP_QUAT_WXYZ]} for t in stamps]
+            gripper[serial] = {int(t): {"gripper_info": [GRIPPER_WIDTH, 0, 1]} for t in stamps}
+        ld = lowdim_root / f"RH20T_cfg{CFG_ID}" / ep.name / "transformed"
+        ld.mkdir(parents=True)
+        np.save(ld / "tcp.npy", tcp, allow_pickle=True)
+        np.save(ld / "gripper.npy", gripper, allow_pickle=True)
     # a human demo (must be ignored) and an episode without metadata (skipped)
     (data_root / f"RH20T_cfg{CFG_ID}" / f"{episodes[0]}_human").mkdir()
     (data_root / f"RH20T_cfg{CFG_ID}" / "task_0009_user_0016_scene_0001_cfg_0003").mkdir()
@@ -115,6 +130,7 @@ def rh20t_tree(tmp_path: Path) -> dict:
         "data_root": str(data_root),
         "calib_root": str(calib_root),
         "depth_root": str(depth_root),
+        "lowdim_root": str(lowdim_root),
         "episodes": episodes,
         "in_hand": in_hand
     }
@@ -383,3 +399,24 @@ def test_return_depth_sample_has_every_frame(rh20t_tree):
     valid = sample["depth"] > 0
     assert valid.float().mean() > 0.9
     np.testing.assert_allclose(sample["depth"][valid].median().item(), DEPTH_M, atol=0.01)
+
+
+def test_config_rejects_actions_without_lowdim_root():
+    with pytest.raises(ValueError):
+        RH20TMultiViewConfig(data_root="x", calib_root="y", actions=True)
+
+
+def test_action_sample_renders_tcp_at_image_centre(rh20t_tree):
+    # every fixture camera looks at the world origin, where the TCP sits
+    cfg = _config(rh20t_tree, actions=True, lowdim_root=rh20t_tree["lowdim_root"], raymap_height=8, raymap_width=16)
+    sample = RH20TMultiViewDataset(cfg, split="train")[0]
+    V, T = sample["videos"].shape[:2]
+    assert sample["actions"].shape == (V, T, 8)
+    assert sample["action_maps"].shape == (V, T, 4, 8, 16)
+    torch.testing.assert_close(sample["actions"][..., 7], torch.full((V, T), GRIPPER_WIDTH / 100))
+    tcp_blob = sample["action_maps"][:, :, 0]
+    peak = tcp_blob.flatten(-2).argmax(-1)
+    rows, cols = peak // 16, peak % 16
+    assert ((rows - 3.5).abs() <= 1).all() and ((cols - 7.5).abs() <= 1).all()
+    # openness channel = TCP blob x openness
+    torch.testing.assert_close(sample["action_maps"][:, :, 2], tcp_blob * GRIPPER_WIDTH / 100)

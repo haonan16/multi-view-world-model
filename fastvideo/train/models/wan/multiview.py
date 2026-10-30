@@ -19,7 +19,12 @@ Unseen views (``dataset.n_context_views``, tokens design only): only the context
 get a clean history frame; the other views are generated from frame 0 on. With
 ``point_cloud: true`` every view also receives the VAE latent of the context views'
 frame-0 point cloud rendered into it (+ a coverage mask) in latent frame 0, as 17 extra
-input channels (zero-initialised; ``scripts/rh20t/widen_checkpoint.py``).
+input channels (zero-initialised; ``scripts/rh20t/widen_checkpoint.py``). With
+``actions: true`` every latent frame also receives the robot end-effector trajectory rendered
+into each view (``fastvideo/dataset/rh20t_actions.py``) for its pixel frames: 4 maps x 4
+pixel frames = 16 more zero-initialised channels (latent frame 0 uses only the first slot).
+Actions cover future frames by design (the plan being imagined) and are kept in the
+no-history mode, which drops only the point cloud.
 
 Video is decoded and VAE-encoded online (no parquet preprocessing); there is no text,
 every sample uses the UMT5 embedding of the empty prompt.
@@ -36,6 +41,7 @@ import torch.nn.functional as F
 from torch.utils.data import Sampler
 from torchdata.stateful_dataloader import StatefulDataLoader
 
+from fastvideo.dataset.rh20t_actions import ACTION_MAP_CHANNELS
 from fastvideo.dataset.rh20t_multiview import (RH20TMultiViewConfig, RH20TMultiViewDataset, tile_views, untile_views)
 from fastvideo.distributed import get_sp_group, get_world_group
 from fastvideo.forward_context import set_forward_context
@@ -55,6 +61,8 @@ logger = init_logger(__name__)
 DESIGNS = ("tokens", "tiled")
 RAYMAP_CHANNELS = 6
 PC_CHANNELS = 16 + 1  # VAE latent of the rendered point cloud + coverage mask
+VAE_TEMPORAL = 4  # pixel frames per latent frame after the first
+ACTION_CHANNELS = VAE_TEMPORAL * ACTION_MAP_CHANNELS  # action maps of each pixel frame of a latent frame
 NULL_EMBED_FILE = "null_prompt_embed.pt"  # written by scripts/rh20t/make_multiview_checkpoint.py
 
 
@@ -108,14 +116,17 @@ class WanMultiViewModel(WanModel):
         vae_encode_chunk: int = 8,
         null_prompt_embed_path: str | None = None,
         point_cloud: bool = False,
+        actions: bool = False,
         **kwargs: Any,
     ) -> None:
         if design not in DESIGNS:
             raise ValueError(f"design must be one of {DESIGNS}, got {design!r}")
-        if design == "tiled" and (dataset.get("n_context_views") or point_cloud):
-            raise ValueError("unseen views / point_cloud need per-view timesteps: use design=tokens")
+        if design == "tiled" and (dataset.get("n_context_views") or point_cloud or actions):
+            raise ValueError("unseen views / point_cloud / actions need design=tokens")
         if bool(point_cloud) != bool(dataset.get("point_cloud", False)):
             raise ValueError("model point_cloud and dataset.point_cloud must agree")
+        if bool(actions) != bool(dataset.get("actions", False)):
+            raise ValueError("model actions and dataset.actions must agree")
         if not 0.0 <= float(p_no_hist) <= 1.0:
             raise ValueError(f"p_no_hist must be in [0, 1], got {p_no_hist}")
         super().__init__(**kwargs)
@@ -126,13 +137,14 @@ class WanMultiViewModel(WanModel):
         self.p_no_hist = float(p_no_hist)
         self.vae_encode_chunk = int(vae_encode_chunk)
         self.point_cloud = bool(point_cloud)
+        self.actions = bool(actions)
         self.null_prompt_embed_path = null_prompt_embed_path or os.path.join(self._init_from, NULL_EMBED_FILE)
         # no captions and no CFG: the null context replaces the negative prompt
         self.set_requires_negative_conditioning(False)
         self.null_context: torch.Tensor | None = None
         self.null_context_mask: torch.Tensor | None = None
         expected_in = self.transformer.in_channels if hasattr(self.transformer, "in_channels") else None
-        extra = RAYMAP_CHANNELS + (PC_CHANNELS if self.point_cloud else 0)
+        extra = RAYMAP_CHANNELS + (PC_CHANNELS if self.point_cloud else 0) + (ACTION_CHANNELS if self.actions else 0)
         if expected_in is not None and expected_in != self.transformer.out_channels + extra:
             raise ValueError(f"transformer in_channels={expected_in}, expected out_channels + {extra}; build the "
                              "checkpoint with scripts/rh20t/make_multiview_checkpoint.py (+ widen_checkpoint.py)")
@@ -219,10 +231,11 @@ class WanMultiViewModel(WanModel):
 
     @torch.no_grad()
     def pack(self, raw_batch: dict[str, Any]) -> tuple[torch.Tensor, torch.Tensor]:
-        """-> latents [B, V', C, F, h, w], cond [B, V', 6 (+17), F, h, w] (V' = V tokens / 1 tiled).
+        """-> latents [B, V', C, F, h, w], cond [B, V', 6 (+17) (+16), F, h, w] (V' = V tokens / 1 tiled).
 
         cond = raymaps on every frame, then (point_cloud) the rendered-cloud latent and its
-        coverage mask on latent frame 0 only (zeros elsewhere)."""
+        coverage mask on latent frame 0 only (zeros elsewhere), then (actions) the action maps
+        of each latent frame's pixel frames."""
         videos = raw_batch["videos"]  # B, V, T, 3, H, W
         rays = raw_batch["raymaps"]  # B, V, 6, Hr, Wr
         if videos.shape[1] != self.n_views:
@@ -247,7 +260,23 @@ class WanMultiViewModel(WanModel):
                                  mode="area").unflatten(0, (B, Vp))[:, :, :, None]
             first = torch.cat([pc, mask.to(pc.dtype)], dim=2)  # B, V, 17, 1, h, w
             cond.append(F.pad(first, (0, 0, 0, 0, 0, n_lat - 1)))
+        if self.actions:
+            cond.append(self.pack_action_maps(raw_batch["action_maps"], n_lat, h, w).to(latents.dtype))
         return latents, torch.cat(cond, dim=2)
+
+    def pack_action_maps(self, maps: torch.Tensor, n_lat: int, h: int, w: int) -> torch.Tensor:
+        """[B, V, T, A, Hr, Wr] per pixel frame -> [B, V, VAE_TEMPORAL * A, n_lat, h, w]: latent
+        frame 0 holds pixel frame 0 in its first slot, latent frame k >= 1 holds pixel frames
+        4k-3 .. 4k (the frames the causal VAE codes into it)."""
+        B, V, T, A = maps.shape[:4]
+        if 1 + VAE_TEMPORAL * (n_lat - 1) != T:
+            raise ValueError(f"{T} action frames do not match {n_lat} latent frames")
+        maps = maps.to(self.device, torch.float32)
+        if maps.shape[-2:] != (h, w):
+            maps = F.interpolate(maps.flatten(0, 2), size=(h, w), mode="area").unflatten(0, (B, V, T))
+        first = F.pad(maps[:, :, :1], (0, 0, 0, 0, 0, 0, 0, VAE_TEMPORAL - 1))  # B, V, 4, A, h, w
+        groups = torch.cat([first, maps[:, :, 1:]], dim=2).unflatten(2, (n_lat, VAE_TEMPORAL))  # B, V, n, 4, A, h, w
+        return groups.flatten(3, 4).permute(0, 1, 3, 2, 4, 5)  # B, V, 4A, n, h, w
 
     def context_mask(self, raw_batch: dict[str, Any], n_views: int) -> torch.Tensor:
         """[B, V'] bool: views whose history frames are observed (all, unless unseen-view task)."""
@@ -283,7 +312,7 @@ class WanMultiViewModel(WanModel):
         sigma[:, :, :self.n_hist_latent] *= (~hist_views)[:, :, None].float()
         if self.point_cloud:  # no-history samples are unconditional: the render is built from frame 0
             cond = cond.clone()
-            cond[~hist, :, RAYMAP_CHANNELS:] = 0
+            cond[~hist, :, RAYMAP_CHANNELS:RAYMAP_CHANNELS + PC_CHANNELS] = 0
         s = sigma[:, :, None, :, None, None].to(latents.dtype)
 
         batch = TrainingBatch()
@@ -358,7 +387,7 @@ class WanMultiViewModel(WanModel):
 
         ``history_guidance`` w != 1 applies classifier-free guidance on the history: the
         unconditional flow comes from the no-history mode trained with ``p_no_hist`` (history
-        frames noised to the current level, point-cloud channels zeroed), and the step uses
+        frames noised to the current level, point-cloud channels zeroed, actions kept), and the step uses
         uncond + w * (cond - uncond). It doubles the cost of each step."""
         B, Vp, _, n_lat = latents.shape[:4]
         shift = self.timestep_shift
@@ -375,7 +404,8 @@ class WanMultiViewModel(WanModel):
         if guided:
             hist_noise = torch.randn(latents.shape, generator=generator, device=latents.device, dtype=torch.float32)
             cond_uncond = cond.clone()
-            cond_uncond[:, :, RAYMAP_CHANNELS:] = 0  # as in no-history training samples
+            if self.point_cloud:  # as in no-history training samples
+                cond_uncond[:, :, RAYMAP_CHANNELS:RAYMAP_CHANNELS + PC_CHANNELS] = 0
         for i in range(steps):  # state kept in fp32; only the model input is cast
             x = torch.where(keep, clean, x)
             t = (~hist).float() * float(sigmas[i]) * self.num_train_timestep  # B, V', F

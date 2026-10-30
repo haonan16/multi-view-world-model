@@ -243,6 +243,7 @@ class _StubSampler:
     """Just enough of WanMultiViewModel for `sample` (bound unbound)."""
     timestep_shift = 3.0
     num_train_timestep = 1000
+    point_cloud = True
 
     def __init__(self):
         self.seen_t = []
@@ -343,3 +344,22 @@ def test_prepare_batch_no_history_drops_point_cloud(monkeypatch):
     tb, _ = _prepare(_StubPrepare(p_no_hist=1.0, point_cloud=True), monkeypatch)
     assert torch.all(tb.sigmas == 0.5) and torch.all(tb.loss_mask == 1)
     assert torch.all(tb.raymaps[:, :, :6] == 1) and torch.all(tb.raymaps[:, :, 6:] == 0)
+
+
+def test_pack_action_maps_groups_pixel_frames_by_latent_frame():
+    from fastvideo.train.models.wan.multiview import ACTION_CHANNELS, VAE_TEMPORAL, WanMultiViewModel
+
+    class _Stub:
+        device = torch.device("cpu")
+
+    B, V, n_lat, A, h, w = 2, 3, 3, 4, 2, 5
+    T = 1 + VAE_TEMPORAL * (n_lat - 1)
+    maps = torch.arange(T, dtype=torch.float32)[None, None, :, None, None, None].expand(B, V, T, A, h, w)
+    out = WanMultiViewModel.pack_action_maps(_Stub(), maps, n_lat, h, w)
+    assert out.shape == (B, V, ACTION_CHANNELS, n_lat, h, w)
+    frame_of = out[0, 0, ::A, :, 0, 0]  # [slot, latent]: the pixel frame each slot holds
+    assert frame_of[:, 0].tolist() == [0, 0, 0, 0]  # latent 0: frame 0, then zero padding
+    assert out[0, 0, A:, 0].abs().max() == 0
+    assert frame_of[:, 1].tolist() == [1, 2, 3, 4] and frame_of[:, 2].tolist() == [5, 6, 7, 8]
+    with pytest.raises(ValueError):
+        WanMultiViewModel.pack_action_maps(_Stub(), maps[:, :, :-1], n_lat, h, w)

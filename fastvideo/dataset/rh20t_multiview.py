@@ -43,6 +43,10 @@ Sample keys:
     depth       [V, T, H, W]     (return_depth only) sensor depth of every frame in metres,
                                  cropped like the colour, 0 = invalid. Evaluation only: it
                                  includes future frames, so it must not condition a model.
+    actions     [V, T, 8]        (actions only) end-effector xyz in each view's camera frame (m),
+                                 quaternion wxyz, gripper openness; every frame (the plan)
+    action_maps [V, T, 4, Hr, Wr] (actions only) actions rendered into each view at raymap
+                                 resolution (rh20t_actions.render_action_maps)
 """
 from __future__ import annotations
 
@@ -63,6 +67,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset
 
+from fastvideo.dataset.rh20t_actions import load_episode_actions, render_action_maps, view_actions
 from fastvideo.dataset.rh20t_depth import clean_depth, read_depth_frames, render_points, unproject
 from fastvideo.logger import init_logger
 
@@ -114,6 +119,10 @@ class RH20TMultiViewConfig:
     # Also return every view's depth at every clip frame (needs depth_root). For evaluation
     # (e.g. cross-view reprojection); it includes future frames.
     return_depth: bool = False
+    # Robot end-effector trajectory of every clip frame, raw and rendered into each view
+    # (rh20t_actions.py). Needs lowdim_root: <lowdim_root>/RH20T_cfgN/<episode>/transformed/.
+    actions: bool = False
+    lowdim_root: str | None = None
 
     def __post_init__(self) -> None:
         if self.n_views < 1:
@@ -130,6 +139,8 @@ class RH20TMultiViewConfig:
             raise ValueError("point_cloud=True needs depth_root and n_context_views")
         if self.return_depth and self.depth_root is None:
             raise ValueError("return_depth=True needs depth_root")
+        if self.actions and self.lowdim_root is None:
+            raise ValueError("actions=True needs lowdim_root")
 
 
 # ---------------------------------------------------------------------------
@@ -490,6 +501,8 @@ class RH20TMultiViewDataset(Dataset):
         n_ctx = self.cfg.n_context_views or len(serials)
         context = torch.arange(len(serials)) < n_ctx  # serials are already in random order
         extra = {"depth": torch.stack(depths)} if self.cfg.return_depth else {}
+        if self.cfg.actions:
+            extra |= self.episode_actions(rec, serials, np.stack(stamps), K_ray, Hr, Wr)
         if self.cfg.point_cloud:
             extra |= self.render_context_cloud(rec, serials[:n_ctx], ok, first[:n_ctx], c2w_rel, K)
         return {
@@ -505,6 +518,15 @@ class RH20TMultiViewDataset(Dataset):
             "context": context,
             **extra,
         }
+
+    def episode_actions(self, rec: dict[str, Any], serials: list[str], stamps: np.ndarray, K_ray: torch.Tensor,
+                        Hr: int, Wr: int) -> dict[str, torch.Tensor]:
+        """Per-view end-effector trajectory at the clip's frame times and its rendering."""
+        assert self.cfg.lowdim_root is not None
+        tcp, gripper = load_episode_actions(Path(self.cfg.lowdim_root) / f"RH20T_cfg{rec['cfg_id']}" / rec["episode"])
+        actions = torch.from_numpy(np.stack([view_actions(tcp, gripper, s, t) for s, t in zip(serials, stamps)])).float()
+        maps = torch.stack([render_action_maps(a, K_ray[v], Hr, Wr) for v, a in enumerate(actions)])
+        return {"actions": actions, "action_maps": maps}
 
     def render_context_cloud(self, rec: dict[str, Any], ctx_serials: list[str], ok: dict[str, Any],
                              ctx_frames: list[torch.Tensor], c2w_rel: torch.Tensor,
