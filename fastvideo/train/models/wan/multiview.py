@@ -351,9 +351,15 @@ class WanMultiViewModel(WanModel):
                n_hist: int,
                steps: int,
                generator: torch.Generator,
-               context: torch.Tensor | None = None) -> torch.Tensor:
+               context: torch.Tensor | None = None,
+               history_guidance: float = 1.0) -> torch.Tensor:
         """Euler flow-ODE sampling; the first ``n_hist`` latent frames of the ``context``
-        views ([B, V'] bool, default all) are kept clean, everything else is generated."""
+        views ([B, V'] bool, default all) are kept clean, everything else is generated.
+
+        ``history_guidance`` w != 1 applies classifier-free guidance on the history: the
+        unconditional flow comes from the no-history mode trained with ``p_no_hist`` (history
+        frames noised to the current level, point-cloud channels zeroed), and the step uses
+        uncond + w * (cond - uncond). It doubles the cost of each step."""
         B, Vp, _, n_lat = latents.shape[:4]
         shift = self.timestep_shift
         s = torch.linspace(1.0, 0.0, steps + 1, device=latents.device)
@@ -365,10 +371,21 @@ class WanMultiViewModel(WanModel):
         clean = latents.float()
         x = torch.randn(latents.shape, generator=generator, device=latents.device, dtype=torch.float32)
         text = self._null_text_dict(B)
+        guided = history_guidance != 1.0
+        if guided:
+            hist_noise = torch.randn(latents.shape, generator=generator, device=latents.device, dtype=torch.float32)
+            cond_uncond = cond.clone()
+            cond_uncond[:, :, RAYMAP_CHANNELS:] = 0  # as in no-history training samples
         for i in range(steps):  # state kept in fp32; only the model input is cast
             x = torch.where(keep, clean, x)
             t = (~hist).float() * float(sigmas[i]) * self.num_train_timestep  # B, V', F
-            flow = self.predict_flow(x, t, cond, text)
-            x = x + (sigmas[i + 1] - sigmas[i]) * flow.float()
+            flow = self.predict_flow(x, t, cond, text).float()
+            if guided:
+                sigma = float(sigmas[i])
+                x_uncond = torch.where(keep, (1 - sigma) * clean + sigma * hist_noise, x)
+                flow_uncond = self.predict_flow(x_uncond, torch.full_like(t, sigma * self.num_train_timestep),
+                                                cond_uncond, text).float()
+                flow = flow_uncond + history_guidance * (flow - flow_uncond)
+            x = x + (sigmas[i + 1] - sigmas[i]) * flow
         x = torch.where(keep, clean, x)
         return x.to(latents.dtype)

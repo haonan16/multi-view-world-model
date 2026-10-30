@@ -276,6 +276,27 @@ def test_sample_keeps_only_context_history_clean():
         assert torch.all(t[hist] == 0) and torch.all(t[~hist] > 0)
 
 
+def test_sample_history_guidance_adds_unconditional_pass():
+    from fastvideo.train.models.wan.multiview import WanMultiViewModel
+    lat = torch.randn(1, 2, 4, 3, 2, 2)
+    cond = torch.ones(1, 2, 6 + 17, 3, 2, 2)
+    kwargs = dict(n_hist=1, steps=3, context=torch.tensor([[True, False]]))
+    plain = _StubSampler()
+    out_plain = WanMultiViewModel.sample(plain, lat, cond, generator=torch.Generator().manual_seed(0), **kwargs)
+    guided = _StubSampler()
+    out_guided = WanMultiViewModel.sample(guided,
+                                          lat,
+                                          cond,
+                                          generator=torch.Generator().manual_seed(0),
+                                          history_guidance=2.0,
+                                          **kwargs)
+    assert len(plain.seen_t) == 3 and len(guided.seen_t) == 6
+    # unconditional passes noise every frame, including the context view's history
+    assert all(torch.all(t > 0) for t in guided.seen_t[1::2])
+    # the stub's flow ignores its input, so guidance leaves the result unchanged
+    torch.testing.assert_close(out_guided, out_plain)
+
+
 class _StubPrepare:
     """Just enough of WanMultiViewModel for `prepare_batch`."""
     num_train_timestep = 1000

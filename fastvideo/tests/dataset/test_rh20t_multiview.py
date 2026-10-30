@@ -11,8 +11,8 @@ import torch
 
 from fastvideo.dataset.rh20t_depth import read_depth_frames
 from fastvideo.dataset.rh20t_multiview import (IN_HAND, RH20TMultiViewConfig, RH20TMultiViewDataset, camera_to_raymap,
-                                               center_crop_box, crop_resize_intrinsics, grid_for, marker_angle_deg,
-                                               nearest_frames, read_frames, tile_views, untile_views)
+                                               center_crop_box, crop_resize_depth, crop_resize_intrinsics, grid_for,
+                                               marker_angle_deg, nearest_frames, read_frames, tile_views, untile_views)
 
 CFG_ID = 3
 CALIB_TS = 1631153393825
@@ -356,3 +356,30 @@ def test_point_cloud_sample_renders_context_views(rh20t_tree):
         assert (red - sample["videos"][v, 0, 0][mask[v]]).abs().median() < 0.05
     # empty pixels are exactly zero
     assert (sample["pc_render"][~mask[:, None].expand(-1, 3, -1, -1)] == 0).all()
+
+
+def test_config_rejects_return_depth_without_depth_root():
+    with pytest.raises(ValueError):
+        RH20TMultiViewConfig(data_root="x", calib_root="y", return_depth=True)
+
+
+def test_crop_resize_depth_matches_colour_crop():
+    # depth at 2x the colour resolution; the colour crop keeps rows 2..5 of an 8x8 frame
+    h, w = 8, 8
+    depth = torch.arange(16, dtype=torch.float32)[:, None].expand(16, 16).clone()[None] * 0.1 + 0.5  # row-coded
+    out = crop_resize_depth(depth, (2, 6, 0, 8), h, w, 4, 8)
+    assert out.shape == (1, 4, 8)
+    # nearest resize of depth rows 4..11 (2 per output row) keeps one of each pair
+    rows = out[0, :, 0]
+    assert ((rows >= 0.5 + 0.4 - 1e-6) & (rows <= 0.5 + 1.1 + 1e-6)).all()
+    assert torch.all(rows[1:] > rows[:-1])
+
+
+def test_return_depth_sample_has_every_frame(rh20t_tree):
+    cfg = _config(rh20t_tree, depth_root=rh20t_tree["depth_root"], n_context_views=2, return_depth=True)
+    sample = RH20TMultiViewDataset(cfg, split="train")[0]
+    V, T, H, W = sample["videos"].shape[:2] + sample["videos"].shape[-2:]
+    assert sample["depth"].shape == (V, T, H, W)
+    valid = sample["depth"] > 0
+    assert valid.float().mean() > 0.9
+    np.testing.assert_allclose(sample["depth"][valid].median().item(), DEPTH_M, atol=0.01)

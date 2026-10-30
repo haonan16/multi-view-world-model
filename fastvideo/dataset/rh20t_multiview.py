@@ -40,6 +40,9 @@ Sample keys:
     pc_render   [V, 3, H, W]     (point_cloud only) frame-0 RGB of the context views' fused
                                  depth point cloud rendered into each view, [-1, 1], 0 where empty
     pc_mask     [V, 1, H, W]     (point_cloud only) 1 where pc_render has a point
+    depth       [V, T, H, W]     (return_depth only) sensor depth of every frame in metres,
+                                 cropped like the colour, 0 = invalid. Evaluation only: it
+                                 includes future frames, so it must not condition a model.
 """
 from __future__ import annotations
 
@@ -108,6 +111,9 @@ class RH20TMultiViewConfig:
     # Render the frame-0 point cloud of the context views into every view (needs depth_root
     # and n_context_views).
     point_cloud: bool = False
+    # Also return every view's depth at every clip frame (needs depth_root). For evaluation
+    # (e.g. cross-view reprojection); it includes future frames.
+    return_depth: bool = False
 
     def __post_init__(self) -> None:
         if self.n_views < 1:
@@ -122,6 +128,8 @@ class RH20TMultiViewConfig:
             raise ValueError(f"n_context_views must be in [1, n_views={self.n_views}], got {self.n_context_views}")
         if self.point_cloud and (self.depth_root is None or self.n_context_views is None):
             raise ValueError("point_cloud=True needs depth_root and n_context_views")
+        if self.return_depth and self.depth_root is None:
+            raise ValueError("return_depth=True needs depth_root")
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +199,17 @@ def center_crop_box(h_src: int, w_src: int, h_dst: int, w_dst: int) -> tuple[int
     new_h, new_w = min(new_h, h_src), min(new_w, w_src)
     top, left = (h_src - new_h) // 2, (w_src - new_w) // 2
     return top, top + new_h, left, left + new_w
+
+
+def crop_resize_depth(depth: torch.Tensor, box: tuple[int, int, int, int], h_src: int, w_src: int, h_dst: int,
+                      w_dst: int) -> torch.Tensor:
+    """Crop [T, dh, dw] depth (metres) with a colour-frame ``box`` given at (h_src, w_src), then
+    clean it and resize to (h_dst, w_dst) with nearest neighbour (no mixing across edges)."""
+    dh, dw = depth.shape[-2:]
+    top, bottom, left, right = box
+    sy, sx = dh / h_src, dw / w_src
+    d = depth[..., int(round(top * sy)):int(round(bottom * sy)), int(round(left * sx)):int(round(right * sx))]
+    return F.interpolate(clean_depth(d)[:, None], size=(h_dst, w_dst), mode="nearest")[:, 0]
 
 
 def crop_resize_intrinsics(K: np.ndarray, box: tuple[int, int, int, int], h_dst: int, w_dst: int) -> np.ndarray:
@@ -440,7 +459,7 @@ class RH20TMultiViewDataset(Dataset):
     def build_sample(self, rec: dict[str, Any], serials: list[str], ok: dict[str, Any]) -> dict[str, Any]:
         calib = self.load_calib(rec["cfg_id"], rec["calib_ts"])
         H, W = self.cfg.height, self.cfg.width
-        frames, Ks, w2cs, stamps, errs, first = [], [], [], [], [], []
+        frames, Ks, w2cs, stamps, errs, first, depths = [], [], [], [], [], [], []
         for s in serials:
             j, t, err = ok[s]
             x = read_frames(Path(rec["ep_dir"]) / f"cam_{s}" / "color" / "color.mp4", j)  # T, 3, h, w uint8
@@ -451,6 +470,9 @@ class RH20TMultiViewDataset(Dataset):
             K[0] *= w / CALIB_W
             K[1] *= h / CALIB_H
             top, bottom, left, right = box = center_crop_box(h, w, H, W)
+            if self.cfg.return_depth:
+                d = read_depth_frames(self._depth_path(rec["ep_dir"], s, rec["cfg_id"]), j)
+                depths.append(crop_resize_depth(torch.from_numpy(d), box, h, w, H, W))
             x = x[..., top:bottom, left:right].float()
             x = F.interpolate(x, size=(H, W), mode="bilinear", align_corners=False, antialias=True)
             frames.append(x / 127.5 - 1.0)
@@ -467,9 +489,9 @@ class RH20TMultiViewDataset(Dataset):
         K_ray[:, 1] *= Hr / H
         n_ctx = self.cfg.n_context_views or len(serials)
         context = torch.arange(len(serials)) < n_ctx  # serials are already in random order
-        extra = {}
+        extra = {"depth": torch.stack(depths)} if self.cfg.return_depth else {}
         if self.cfg.point_cloud:
-            extra = self.render_context_cloud(rec, serials[:n_ctx], ok, first[:n_ctx], c2w_rel, K)
+            extra |= self.render_context_cloud(rec, serials[:n_ctx], ok, first[:n_ctx], c2w_rel, K)
         return {
             "videos": torch.stack(frames).clamp_(-1, 1),
             "raymaps": camera_to_raymap(K_ray, c2w_rel, Hr, Wr),

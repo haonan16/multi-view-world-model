@@ -4,14 +4,21 @@
 Clip i is val index i: the dataset makes the episode, time window, camera order and
 context views a function of i only, and the sampling noise is seeded from (seed, i), so
 every checkpoint sees identical inputs and noise. Writes per-clip, per-view, per-frame
-PSNR/SSIM of the prediction, the copy-frame-0 baseline and (point-cloud runs) the static
-render, so arms can be compared clip by clip (scripts/rh20t/summarize_unseen_eval.py).
-Clips are always loaded with the point-cloud render, also for RGB-only models (their
-``pack`` ignores it), so both arms see the same clips and are also scored separately on the
-pixels the context cloud covers and the pixels it does not.
+image metrics (scripts/rh20t/unseen_metrics.py: PSNR, SSIM, PSNR on covered / uncovered /
+moving pixels, LPIPS) of the prediction, the copy-frame-0 baseline (raw pixels, and after the
+VAE round trip, which has the same reconstruction ceiling as the model) and the static render,
+plus cross-view reprojection PSNR of the prediction and of the ground truth, so arms can be
+compared clip by clip (scripts/rh20t/summarize_unseen_eval.py).
+Clips are always loaded with the point-cloud render and every frame's depth, also for
+RGB-only models (their ``pack`` ignores both), so both arms see the same clips.
+
+With ``--num-samples K > 1`` each clip is sampled K times with different noise; ``pred``
+is the first sample (comparable across runs) and ``pred_mean`` scores the average of the K
+samples, which separates sample-to-sample randomness from systematic error.
 
     python scripts/rh20t/eval_unseen_matched.py --checkpoint <checkpoint-N> --out <shard.npz> \
-        [--num-clips 254 --shard 0 --num-shards 4 --batch-size 4 --steps 30 --seed 1000]
+        [--num-clips 254 --shard 0 --num-shards 4 --batch-size 4 --steps 30 --seed 1000 --num-samples 1 \
+         --history-guidance 1.0]
 """
 
 from __future__ import annotations
@@ -19,6 +26,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import sys
 import time
 from pathlib import Path
 
@@ -26,9 +34,14 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, Subset
 
-from fastvideo.dataset.rh20t_multiview import RH20TMultiViewDataset
-from fastvideo.train.entrypoint.dcp_to_diffusers import _ensure_distributed, _run_config_from_raw
-from fastvideo.train.methods.fine_tuning.multiview_flow import MultiViewFlowMethod, ssim
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from unseen_metrics import FIELDS, cross_view_psnr, image_metrics  # noqa: E402
+
+from fastvideo.dataset.rh20t_multiview import RH20TMultiViewDataset  # noqa: E402
+from fastvideo.train.entrypoint.dcp_to_diffusers import _ensure_distributed, _run_config_from_raw  # noqa: E402
+from fastvideo.train.methods.fine_tuning.multiview_flow import MultiViewFlowMethod  # noqa: E402
+
+SAMPLE_SEED_STRIDE = 7919  # seed offset between the K samples of one clip
 
 
 def load_method(checkpoint: Path) -> MultiViewFlowMethod:
@@ -51,54 +64,73 @@ def load_method(checkpoint: Path) -> MultiViewFlowMethod:
     return method
 
 
-def per_image(pred: torch.Tensor, gt: torch.Tensor, mask: torch.Tensor) -> np.ndarray:
-    """[B, V, T, 3, H, W] in [-1, 1]; mask [B, V, 1, H, W] (1 = covered by the context cloud).
-    -> [B, V, T, 4]: PSNR, SSIM, PSNR on covered pixels, PSNR on uncovered pixels (NaN if none)."""
-    p = ((pred.float() + 1) / 2).clamp(0, 1)
-    g = ((gt.float() + 1) / 2).clamp(0, 1)
-    se = ((p - g)**2).mean(dim=3)  # B, V, T, H, W
-    m = mask.float()  # B, V, 1, H, W -> broadcasts over T
+def vae_copy0(method: MultiViewFlowMethod, batch: dict, gt: torch.Tensor) -> torch.Tensor:
+    """Frame 0 after the VAE round trip, repeated over time -> [B, V, T, 3, H, W]. The causal
+    VAE codes frame 0 alone in latent frame 0, so this is the model's best static output."""
+    latents, _ = method.student.pack(batch)
+    first = method._to_full(method.student.decode_views(latents[:, :, :, :1]).float(), *gt.shape[-2:])
+    return first[:, :, :1].expand_as(gt)
 
-    def psnr(weight: torch.Tensor) -> torch.Tensor:
-        n = weight.expand_as(se).sum(dim=(-2, -1))
-        mse = (se * weight).sum(dim=(-2, -1)) / n.clamp(min=1)
-        return torch.where(n > 0, -10 * torch.log10(mse.clamp(min=1e-10)), torch.nan)
 
-    s = ssim(p.flatten(0, 2), g.flatten(0, 2)).reshape(gt.shape[:3])
-    return torch.stack([psnr(torch.ones_like(m)), s, psnr(m), psnr(1 - m)], dim=-1).cpu().numpy()
+def sample_views(method: MultiViewFlowMethod, batch: dict, gt: torch.Tensor, steps: int, generator: torch.Generator,
+                 history_guidance: float) -> torch.Tensor:
+    """One sample of every view -> [B, V, T, 3, H, W] at the ground-truth resolution."""
+    student = method.student
+    latents, cond = student.pack(batch)
+    ctx = student.context_mask(batch, latents.shape[1])
+    sampled = student.sample(latents,
+                             cond,
+                             n_hist=student.n_hist_latent,
+                             steps=steps,
+                             generator=generator,
+                             context=ctx,
+                             history_guidance=history_guidance)
+    return method._to_full(student.decode_views(sampled).float(), *gt.shape[-2:])
 
 
 @torch.no_grad()
-def evaluate(method: MultiViewFlowMethod, indices: list[int], batch_size: int, steps: int,
-             seed: int) -> dict[str, np.ndarray]:
+def evaluate(method: MultiViewFlowMethod, indices: list[int], batch_size: int, steps: int, seed: int,
+             num_samples: int, history_guidance: float) -> dict[str, np.ndarray]:
+    import lpips
+
     student = method.student
     student.ensure_null_context()
-    dataset = RH20TMultiViewDataset(dataclasses.replace(student.dataset_config, point_cloud=True), split="val")
-    loader = DataLoader(Subset(dataset, indices), batch_size=batch_size, shuffle=False, num_workers=4)
-    out: dict[str, list] = {k: [] for k in ("index", "episode", "context", "gt_mean", "pred", "copy0", "render")}
+    lpips_fn = lpips.LPIPS(net="alex", verbose=False).to(student.device).eval()
+    cfg = dataclasses.replace(student.dataset_config, point_cloud=True, return_depth=True)
+    loader = DataLoader(Subset(RH20TMultiViewDataset(cfg, split="val"), indices),
+                        batch_size=batch_size,
+                        shuffle=False,
+                        num_workers=4)
+    keys = ("context", "gt_mean", "pred", "pred_mean", "copy0", "copy0_vae", "render", "xview_pred", "xview_gt")
+    out: dict[str, list] = {k: [] for k in ("index", "episode", *keys)}
     generator = torch.Generator(device=student.device)
     done = 0
     for batch in loader:
         batch_idx = indices[done:done + len(batch["videos"])]
         done += len(batch_idx)
-        generator.manual_seed(seed * 100003 + batch_idx[0])
         gt = batch["videos"].to(student.device).float()
-        latents, cond = student.pack(batch)
-        ctx = student.context_mask(batch, latents.shape[1])
-        sampled = student.sample(latents, cond, n_hist=student.n_hist_latent, steps=steps, generator=generator,
-                                 context=ctx)
-        pred = method._to_full(student.decode_views(sampled).float(), *gt.shape[-2:])
-        mask = batch["pc_mask"].to(student.device)  # B, V, 1, H, W
+        samples = []
+        for k in range(num_samples):
+            generator.manual_seed(seed * 100003 + batch_idx[0] + k * SAMPLE_SEED_STRIDE)
+            samples.append(sample_views(method, batch, gt, steps, generator, history_guidance))
+        pred = samples[0]
+        cover = batch["pc_mask"].to(student.device)  # B, V, 1, H, W
         render = batch["pc_render"].to(student.device).float()[:, :, None].expand_as(gt)
-        out["pred"].append(per_image(pred, gt, mask))
-        out["copy0"].append(per_image(gt[:, :, :1].expand_as(gt), gt, mask))
-        out["render"].append(per_image(render, gt, mask))
+        out["pred"].append(image_metrics(pred, gt, cover, lpips_fn))
+        if num_samples > 1:
+            out["pred_mean"].append(image_metrics(torch.stack(samples).mean(0), gt, cover, lpips_fn))
+        out["copy0"].append(image_metrics(gt[:, :, :1].expand_as(gt), gt, cover, lpips_fn))
+        out["copy0_vae"].append(image_metrics(vae_copy0(method, batch, gt), gt, cover, lpips_fn))
+        out["render"].append(image_metrics(render, gt, cover, lpips_fn))
+        geometry = [batch[k].to(student.device) for k in ("depth", "intrinsics", "c2w")]
+        out["xview_pred"].append(cross_view_psnr(pred, *geometry))
+        out["xview_gt"].append(cross_view_psnr(gt, *geometry))
         out["gt_mean"].append(gt.mean(dim=(2, 3, 4, 5)).cpu().numpy())  # identical inputs across arms
         out["index"].extend(batch_idx)
         out["episode"].extend(batch["episode"])
-        out["context"].append(ctx.cpu().numpy())
+        out["context"].append(student.context_mask(batch, gt.shape[1]).cpu().numpy())
         print(f"[eval] {done}/{len(indices)} clips", flush=True)
-    arrays = {k: np.concatenate(v) for k, v in out.items() if k not in ("index", "episode")}
+    arrays = {k: np.concatenate(out[k]) for k in keys if out[k]}
     return {**arrays, "index": np.asarray(out["index"]), "episode": np.asarray(out["episode"])}
 
 
@@ -112,19 +144,31 @@ def main() -> None:
     ap.add_argument("--batch-size", type=int, default=4)
     ap.add_argument("--steps", type=int, default=30)
     ap.add_argument("--seed", type=int, default=1000)
+    ap.add_argument("--num-samples", type=int, default=1, help="samples per clip; >1 also scores their mean")
+    ap.add_argument("--history-guidance", type=float, default=1.0, help="CFG weight on the history (1 = off)")
     args = ap.parse_args()
     if not 0 <= args.shard < args.num_shards:
         raise ValueError(f"--shard must be in [0, {args.num_shards}), got {args.shard}")
+    if args.num_samples < 1 or args.steps < 1:
+        raise ValueError("--num-samples and --steps must be >= 1")
     if not (args.checkpoint / "dcp").is_dir():
         raise FileNotFoundError(f"no dcp/ under {args.checkpoint}")
 
     t0 = time.time()
     method = load_method(args.checkpoint)
     indices = list(range(args.shard, args.num_clips, args.num_shards))
-    result = evaluate(method, indices, args.batch_size, args.steps, args.seed)
+    result = evaluate(method, indices, args.batch_size, args.steps, args.seed, args.num_samples, args.history_guidance)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     step = json.loads((args.checkpoint / "metadata.json").read_text())["step"]
-    np.savez(args.out, **result, step=step, steps=args.steps, seed=args.seed, checkpoint=str(args.checkpoint))
+    np.savez(args.out,
+             **result,
+             fields=np.asarray(FIELDS),
+             step=step,
+             steps=args.steps,
+             seed=args.seed,
+             num_samples=args.num_samples,
+             history_guidance=args.history_guidance,
+             checkpoint=str(args.checkpoint))
     print(f"[eval] wrote {args.out} ({len(indices)} clips, step {step}) in {time.time() - t0:.0f}s", flush=True)
 
 
