@@ -228,8 +228,46 @@ not (+0.46 dB). Point cloud at 43k against RGB at 32k gives +0.71 dB (CI +0.61 t
 arms keep improving with training, at about +0.75 dB per 10k steps for RGB between 10k
 and 32k.
 
-On observed views neither model beats copying frame 0. The gap is 6.3 dB at frame 1 and
-1.7–1.9 dB at frame 12, so it comes from the first generated latent rather than from drift.
+On observed views neither model beats copying frame 0 pixels. That baseline is unfair:
+it skips the VAE, whose reconstruction ceiling is about 32 dB. The gap comes almost entirely
+from near-static clips, where the copy scores about 50 dB and the model about 31.6 dB.
+Against frame 0 after the VAE round trip (`copy0_vae`, 23.44 dB on observed views), the
+43k point-cloud model is 0.4 dB behind at frame 1 and 0.8 dB behind at frame 12. On moving
+pixels it is slightly better than either copy (13.85 vs 13.38 dB). It does not predict the
+robot's motion, which it cannot know without the actions.
+
+The second evaluation (2026-10-30, `outputs/eval_unseen_matched/full_v2/summary.{md,json}`)
+adds metrics that are less dominated by static pixels, again at matched step 10,000:
+
+| unseen views, point cloud vs RGB | mean | 95% CI |
+|----------------------------------|------|--------|
+| PSNR (dB) | +0.58 | +0.46 to +0.71 |
+| LPIPS (lower is better) | 0.209 vs 0.234 | −0.03 to −0.02 |
+| PSNR on moving pixels (dB) | +0.25 | +0.11 to +0.42 |
+| cross-view reprojection PSNR (dB) | +0.37 | +0.27 to +0.47 |
+
+Cross-view reprojection warps each generated view into the other cameras with sensor depth
+and scores agreement on unoccluded pixels. The same warp of the real video scores 16.4 dB
+on pairs with an unseen view, the level imposed by depth noise and lighting. Averaging two
+samples adds about 1 dB PSNR without changing LPIPS, so PSNR partly rewards blur. LPIPS and
+cross-view PSNR are the more informative headline metrics.
+
+## Action conditioning
+
+`actions: true` (dataset and model) adds the robot end-effector trajectory of every clip
+frame. `fastvideo/dataset/rh20t_actions.py` reads `transformed/tcp.npy` (TCP pose already in
+each camera's frame, scalar-first quaternion) and `gripper.npy` from the low-dim release. It
+renders four maps per frame and view at raymap resolution: TCP blob, wrist blob (0.1 m back
+along the tool axis), blob x gripper openness and blob x depth. The model packs the four
+pixel frames of each latent frame into 16 zero-initialised channels. The executed trajectory
+stands in for commanded actions and covers future frames by design. Projection of the logged
+TCP into the colour frames was checked on 4 cameras (0 ms timestamp offset); all 254 val
+episodes have tracks for their cameras.
+
+`rh20t_unseen_pc_actions.yaml` warm-starts from the point-cloud week run at step 78,500
+(`scripts/rh20t/prepare_actions_checkpoint.sbatch` exports and widens it). The week run
+continuing from the same step is the matched control: same data and global batch. The only
+other difference is the fresh optimizer of the action run.
 
 ## Setup
 
@@ -332,6 +370,5 @@ Neither design beats copying frame 0 on these image metrics yet. W&B: project
 
 ## Not yet done
 
-- Action conditioning: the low-dim signals (`tcp_base`, `gripper`, `force_torque`) are
-  being downloaded but are not read by the dataset or the model yet.
+- Force/torque signals are downloaded but not used.
 - Human demos (`*_human`) are skipped; they have color but no robot data.
