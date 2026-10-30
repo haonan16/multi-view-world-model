@@ -213,13 +213,8 @@ class MultiViewFlowMethod(FineTuneMethod):
         y = F.interpolate(x.flatten(0, 2), size=(H, W), mode="bilinear", align_corners=False)
         return y.unflatten(0, x.shape[:3])
 
-    def _log_video(self,
-                   gt: torch.Tensor,
-                   pred: torch.Tensor,
-                   episode: str,
-                   context: torch.Tensor,
-                   render: torch.Tensor | None,
-                   iteration: int) -> None:
+    def _log_video(self, gt: torch.Tensor, pred: torch.Tensor, episode: str, context: torch.Tensor,
+                   render: torch.Tensor | None, iteration: int) -> None:
         """Views side by side: ground truth, prediction, then (point cloud) the rendered cloud.
         gt/pred: [V, T, 3, H, W]; render: [V, 3, H, W]. Target (unobserved) views get a red
         top border."""
