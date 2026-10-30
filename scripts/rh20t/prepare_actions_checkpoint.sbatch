@@ -20,7 +20,9 @@ ACT="$MODELS/rh20t_pc_78500_act16/$NAME"
 cd "$REPO"
 source /n/lab_storage/ydu_lab/Lab/haonan/venvs/mvwm/bin/activate
 export PYTHONPATH="$REPO" PYTHONUNBUFFERED=1 WANDB_MODE=disabled
-EXTRA=$(python -c "from fastvideo.train.models.wan.multiview import ACTION_CHANNELS; print(ACTION_CHANNELS)")
+EXTRA=$(python -c "from fastvideo.train.models.wan.multiview import ACTION_CHANNELS; print(ACTION_CHANNELS)" 2>/dev/null \
+  | tail -n 1)  # fastvideo logs to stdout on import
+[[ "$EXTRA" =~ ^[0-9]+$ ]] || { echo "could not read ACTION_CHANNELS: $EXTRA"; exit 1; }
 if [ ! -e "$PC/transformer/config.json" ]; then
   mkdir -p "$(dirname "$PC")"
   python -m fastvideo.train.entrypoint.dcp_to_diffusers --checkpoint "$CKPT" --output-dir "$PC" --verify
