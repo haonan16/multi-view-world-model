@@ -138,6 +138,7 @@ class ObjectsV2:
         self.views = views or DepthViews(obs.depth, obs.K, obs.c2w)
         self.n, self.d = np.asarray(prep["n"], float), float(prep["d"])
         self.use_views = [v for v in range(obs.V) if v not in exclude_views]
+        self.sc_range = (np.log(0.55), np.log(1.5))
         q, base = rob["q"], rob["base"]
         with torch.no_grad():
             P, _ = robot.surface(torch.as_tensor(q, dtype=torch.float32, device="cuda"),
@@ -195,6 +196,8 @@ class ObjectsV2:
         held = np.zeros(T, bool)
         gate = spec.get("gate", 0.05)
 
+        allow_global = [True]
+
         def pick(t, pred_list, g=None, min_views=1):
             g = g or gate
             chosen, pts = {}, []
@@ -212,6 +215,25 @@ class ObjectsV2:
                 if best:
                     chosen[v] = best[1]; pts.append(best[1]["P"])
             if len(pts) < min_views:
+                if g >= 2.5 * gate and min_views >= 2 and allow_global[0]:     # global re-acquisition: size-consistent instance seen by >= 3 views
+                    cand = []
+                    for v in self.use_views:
+                        for c in self.instances(pr, t, v):
+                            if c["c"] is not None and 0.5 < size(c) / max(ref_size, 1e-3) < 1.6:
+                                cand.append((v, c))
+                    bestg = None
+                    for v, c in cand:
+                        agree = {}
+                        for v2, c2 in cand:
+                            dd = np.linalg.norm(c2["c"] - c["c"])
+                            if dd < 0.03 and (v2 not in agree or dd < agree[v2][0]):
+                                agree[v2] = (dd, c2)
+                        if len(agree) >= 3 and (bestg is None or len(agree) > len(bestg)):
+                            bestg = agree
+                    if bestg:
+                        ch = {v2: x[1] for v2, x in bestg.items()}
+                        return ch, np.median(np.concatenate([x["P"] for x in ch.values()]), 0)
+                    return {}, None
                 if g < 2.5 * gate:          # re-detection with a wider gate, but only if >= 2 views agree
                     ch2, c2 = pick(t, pred_list, 2.5 * gate, 2)
                     if c2 is not None:
@@ -243,6 +265,9 @@ class ObjectsV2:
             if t == th:
                 chosen, c = pick(t, [c0]); c = c if c is not None else c0
                 held[t] = False
+                if chosen:            # reference size from all views (one view may see the object partially)
+                    Pf = np.concatenate([x["P"] for x in chosen.values()])
+                    ref_size = max(ref_size, float(np.quantile(np.linalg.norm(Pf - np.median(Pf, 0), axis=1), 0.9)))
             else:
                 tp = t - 1
                 if held[tp]:
@@ -250,7 +275,9 @@ class ObjectsV2:
                     carried = Tm[:3, :3] @ cen[tp] + Tm[:3, 3]
                     preds = [carried, cen[tp]]
                     held[t] = not (w[t] > max(w_g + 0.025, w_open - 0.015) or w[t] < min(0.005, 0.5 * w_g))
+                    allow_global[0] = False
                     chosen, c = pick(t, preds)
+                    allow_global[0] = True
                     # evidence of release: the object stays where it was while the hand moves away
                     if held[t] and c is not None and np.linalg.norm(c - cen[tp]) < 0.02 and \
                             np.linalg.norm(c - carried) > 0.03 and np.linalg.norm(gpt[t] - c) > 0.05:
@@ -354,13 +381,14 @@ class ObjectsV2:
 
     # -------------------------------------------------------------- pose fit
     def fit_pose(self, t, T_init_list, Ps, Nm, sel_t, held_t, T_hold=None, iters=150, opt_scale=False,
-                 extra=(), w_sil=1.0, w_depth=0.3):
+                 extra=(), w_sil=1.0, w_depth=None):
         """6-DoF (+ optional per-axis scale) fit at frame t (and `extra` frames [(t, sel)] with the same pose).
         Silhouettes are the main signal (SAM 3 masks are sharper than the depth at object edges):
           out-of-mask: projected model points that are not occluded must fall inside the instance mask
           coverage   : the instance mask must be covered by the projected model (2D chamfer)
         plus robust 3D chamfer to the fused mask points and the multiview depth z-test (weaker)."""
         dev = "cuda"
+        w_depth = getattr(self, "w_depth_obj", 0.3) if w_depth is None else w_depth
         frames = [(t, sel_t)] + list(extra)
         self.cur_support = self.support_h(t, sel_t) if sel_t else 0.0
         if sel_t:
@@ -396,7 +424,7 @@ class ObjectsV2:
         for it in range(iters):
             R = so3_exp(w) @ T0[:, :3, :3]
             ctr = T0[:, :3, 3] + tr
-            P = torch.einsum("bij,bnj->bni", R, Pm[None] * ls.clamp(np.log(0.55), np.log(1.5)).exp()[:, None]) + ctr[:, None]
+            P = torch.einsum("bij,bnj->bni", R, Pm[None] * ls.clamp(*self.sc_range).exp()[:, None]) + ctr[:, None]
             N = torch.einsum("bij,nj->bni", R, Nm_)
             s = 0.01 if it < iters // 2 else 0.005
             L = torch.zeros(B, device=dev)
@@ -437,7 +465,7 @@ class ObjectsV2:
             Tout = np.eye(4)
             Tout[:3, :3] = (so3_exp(w) @ T0[:, :3, :3])[b].cpu().numpy()
             Tout[:3, 3] = (T0[:, :3, 3] + tr)[b].cpu().numpy()
-            self.last_scale = ls.clamp(np.log(0.55), np.log(1.5)).exp()[b].cpu().numpy()
+            self.last_scale = ls.clamp(*self.sc_range).exp()[b].cpu().numpy()
         return Tout, float(L[b].detach())
 
     def run(self):
@@ -447,6 +475,9 @@ class ObjectsV2:
             try:
                 sel, cen, held = self.track(spec)
                 self.cur_sphere = spec.get("shape") == "sphere"
+                thin = bool(spec.get("thin"))
+                self.sc_range = (np.log(0.1), np.log(2.5)) if thin else (np.log(0.55), np.log(1.5))
+                self.w_depth_obj = 0.05 if thin else 0.3
             except RuntimeError as ex:
                 self.log(f"  SKIPPED {spec['name']}: {ex}")
                 continue

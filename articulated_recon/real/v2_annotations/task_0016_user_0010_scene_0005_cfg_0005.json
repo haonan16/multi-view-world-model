@@ -17,7 +17,8 @@
      440,
      160
     ]
-   }
+   },
+   "thin": true
   },
   {
    "name": "pool_table",

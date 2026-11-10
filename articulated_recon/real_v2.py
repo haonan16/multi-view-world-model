@@ -219,7 +219,8 @@ for t in range(T):
         for k, ob in enumerate(objs):
             vis = pid == nrob + k
             sid = ob["sel"][t].get(v)
-            if v in ex and vis.sum() > 5:      # held-out view: best-matching SAM 3 instance of the prompt
+            if (v in ex or sid is None) and vis.sum() > 5:   # held-out view, or no instance selected while the model is visible:
+                # score against the best-matching SAM 3 instance of the prompt (0 if none) -> lost tracks count
                 spec = next(x for x in ann["objects"] if x["name"] == ob["name"])
                 best = (0.0, None)
                 for i in sam.ids(spec["prompt"], t, v):

@@ -27,6 +27,7 @@ The robot is still fitted from multiview depth alone. The logged joints are used
 2. **Tracking.** It starts from the clicked instance (the smallest mask under the click) and runs a grasp state machine on the fitted robot:
    - Each frame, every view's instance nearest the predicted position is taken. Instances with a mismatched 3D size (a container around the object, or a neighbour) are rejected.
    - If nothing is near, a wider re-detection gate is tried, which must agree across at least 2 views.
+   - If that fails too, and the object is not held, a global re-acquisition looks for a size-consistent instance seen by at least 3 views.
    - **Rest → held:** a closing event (the gripper was open within 3 frames and is now at a width above 6 mm), with the fingertip point within 4 cm of the object's observed points. The fingertip point is 15 cm from the hand: the real fingers are longer than the URDF's.
    - **Held:** the object is predicted rigidly with the hand.
    - **Release:** the gripper opens.
@@ -38,6 +39,9 @@ The robot is still fitted from multiview depth alone. The logged joints are used
    - Sphere.
    - SAM 3D mesh: orientation from SAM 3D's predicted camera pose mapped to world, scale and position from the fused points.
    - Then a **silhouette shape refinement**: per-axis scale plus pose against the SAM 3 masks of up to 4 rest frames.
+   - A SAM 3D mesh competes with the 2.5D hull, and the lower rest-frame loss wins (SAM 3D's orientation is sometimes wrong).
+   - Open containers (trays, boxes, racks) are a floor plus 4 walls.
+   - `thin` objects get a wider scale range and a low depth weight.
 4. **Pose per frame (6-DoF).** The terms:
    - silhouettes: model points not occluded by the observed depth must fall in the instance mask, and the mask must be covered by the projected model (2D chamfer both ways);
    - 3D chamfer to the fused mask points;
@@ -65,27 +69,40 @@ The few frames above 9 mm all fall where the logged gripper width jumps open or 
 - **Silhouette F@2px** is the share of each silhouette within 2 px of the other: rendered model vs SAM 3 mask, at 640×360. It is size-independent, which matters because many objects are only 15–40 px across.
 - **Held-out** means view 0 was excluded from tracking, shape and pose fitting, then used to score.
 
-| | fitted views | held-out view |
+Scoring:
+- Every (frame, view) where the rendered object is visible counts.
+- If tracking selected no SAM 3 instance there, the render is matched to the best-overlapping SAM 3 instance of the prompt, and scores 0 if there is none.
+- So lost tracks and frames where SAM 3 misses a half-occluded object both pull the numbers down.
+
+| moved objects (25) | fitted views | held-out view 0 |
 |---|---|---|
-| moved: silhouette F@2px (mean / median) | 0.87 / 0.89 | 0.83 / 0.85 |
-| moved: objects with F@2px ≥ 0.8 | 23 / 25 | 17 / 25 |
-| moved: mask IoU (mean / median) | 0.66 / 0.68 | 0.46 |
-| static targets: mask IoU | 0.70 | 0.64 |
-| held state detected | 21 of 25 moved objects (2 of the 25 are pushes, never held) | |
-| grasp interval vs logged gripper (IoU over frames) | 0.56 | |
+| silhouette F@2px, median | 0.85 | 0.85 |
+| silhouette F@2px, mean | 0.83 | 0.83 |
+| objects with F@2px ≥ 0.8 | 19 / 25 | 17 / 25 |
+| mask IoU, median (conservative, see above) | 0.49 | 0.46 |
 
-Best cases (IoU / F@2px):
-- plate put upright into a rack: 0.88 / 0.97;
-- glass lid onto a pan: 0.80 / 0.92;
-- green cups picked up: 0.76–0.78 / 0.93;
-- cube pushed: 0.74 / 0.93;
-- roll taken off a shelf: 0.73 / 0.90;
-- cube moved between trays: 0.70 / 0.90.
+| other | value |
+|---|---|
+| static targets: mask IoU (mean) | 0.55 |
+| held state detected | 21 of 25 moved objects (2 of the 25 are pushes, never held) |
+| grasp interval vs logged gripper (IoU over frames) | 0.57 |
+| moved objects touching their support when not held (≤ 5 mm) | 25 / 25 |
 
-Hardest cases:
-- **Thin objects:** a few pixels wide at 360p, and their depth is mostly background. Knife 0.33 / 0.59, pool cue 0.47 / 0.74, marker 0.49 / 0.81.
-- **Missed grasps:** the roll (held almost fully open) and one plate. The object is still tracked by its masks.
-- **Support contact for plates around racks:** the support height estimated from the surrounding depth is unreliable there, so the contact numbers are large, but the silhouettes fit.
+Held-out and fitted scores agree, so the fits are not overfitting the views they use.
+
+Best cases (F@2px fitted / held-out):
+- cups picked up or moved: 0.83–0.92 / 0.80–0.96;
+- cube pushed: 0.93 / 0.96;
+- block on a scale: 0.87 / 0.95;
+- cubes placed on a target or moved between trays: 0.86–0.91 / 0.89–0.95;
+- lid onto a pan: 0.85 / 0.86;
+- plate put upright into a rack: 0.84 / 0.89.
+
+Failures and limits:
+- **Thin objects:** a few pixels wide at 360p, and their depth is mostly background. Knife 0.76 / 0.72 (IoU 0.11), marker 0.76 / 0.66, pool cue 0.75 / 0.80. A `thin` flag widens the silhouette-driven scale range: the knife's box went from 268×73 to 264×28 mm, and its loss fell from 0.99 to 0.34.
+- **Lost track:** one plate taken out of a rack (task 0051, scene 2) is lost after it is lifted. The grasp is missed, and it moves more than 12 cm before it is seen flat. F@2px is 0.59.
+- **Handset:** long and dark, and SAM 3 misses it in several views. F@2px 0.62 / 0.78.
+- **Missed grasps:** the roll, which is held almost fully open. It is still tracked by its masks.
 
 What helped, measured on the episodes where each change was made:
 
