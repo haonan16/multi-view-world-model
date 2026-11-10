@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Articulated 4D Reconstruction</title>
+<style>
+:root{--bg:#f7f7f5;--panel:#fff;--ink:#1d1d1f;--mute:#6b6b70;--line:#e3e3e0;--acc:#2f6fdb;--good:#1f8a4c;--bad:#b23b3b}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#141416;--panel:#1c1c1f;--ink:#ececee;--mute:#9a9aa2;--line:#2c2c31;--acc:#6aa0ff;--good:#4cc27e;--bad:#e06a6a}}
+:root[data-theme="dark"]{--bg:#141416;--panel:#1c1c1f;--ink:#ececee;--mute:#9a9aa2;--line:#2c2c31;--acc:#6aa0ff;--good:#4cc27e;--bad:#e06a6a}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+header{padding:18px 20px 6px}
+h1{font-size:20px;margin:0 0 4px}
+h2{font-size:15px;margin:18px 0 8px}
+.sub{color:var(--mute);max-width:1100px}
+main{padding:0 20px 40px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;margin:12px 0}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;font-size:12.5px}
+th,td{padding:5px 7px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+th{color:var(--mute);font-weight:600;position:sticky;top:0;background:var(--panel)}
+td.l,th.l{text-align:left}
+tr.r{cursor:pointer}
+tr.r:hover{background:color-mix(in srgb,var(--acc) 8%,transparent)}
+tr.sel{background:color-mix(in srgb,var(--acc) 16%,transparent)}
+.tw{overflow-x:auto}
+.grid{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:14px}
+@media(max-width:900px){.grid{grid-template-columns:1fr}}
+#view{width:100%;height:520px;border-radius:8px;background:#0f1012;display:block}
+.ctl{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 0}
+.ctl label{color:var(--mute)}
+button{background:var(--acc);color:#fff;border:0;border-radius:6px;padding:5px 10px;cursor:pointer}
+video,img.ov{width:100%;border-radius:8px;background:#000}
+.pill{display:inline-block;padding:1px 7px;border-radius:9px;font-size:11.5px;border:1px solid var(--line);color:var(--mute);margin-right:4px}
+.legend span{display:inline-flex;align-items:center;gap:5px;margin-right:12px;color:var(--mute);font-size:12px}
+.legend i{width:11px;height:11px;border-radius:3px;display:inline-block}
+.note{color:var(--mute);font-size:12.5px}
+ol{margin:6px 0 0 18px;padding:0}
+</style>
+</head>
+<body>
+<header>
+<h1>Articulated 4D reconstruction of the dynamic parts, from video plans</h1>
+<div class="sub">The robot is an articulated URDF model, the manipulated objects are box primitives, and the drawer is a primitive with a fitted prismatic joint. Each frame is fitted to the video by fast GPU optimisation. Multiview evidence comes from projecting the same 3D state into every camera and testing it against that camera's depth (z-buffer reasoning, no rasteriser in the loop). The ablations remove multiview, then depth and cameras. Every reconstruction is also rendered into <b>all four</b> cameras, so views not used for fitting are a held-out test.</div>
+</header>
+<main>
+<div class="card">
+<h2 style="margin-top:0">Pipeline</h2>
+<ol class="note">
+<li><b>Lift</b>: the depth and cameras give metric points per view and frame (ground truth, or predicted by the world model). A table plane is fitted with RANSAC, and the foreground is everything above it.</li>
+<li><b>Robot</b>: the base pose (sliding the URDF's base column over the table) and then all 7 joints plus the gripper are optimised per frame from several starting points, then refined jointly. Loss: robust chamfer (observed to model), plus a multiview depth test on surface samples: on the surface (attract), in seen-empty space (penalise), occluded (no evidence).</li>
+<li><b>Objects by motion</b>: points left after the robot are clustered. A frame-0 point is <i>absent</i> at a later frame if some camera now sees through it. Fully absent means a free rigid body (6-DoF pose per frame, hypotheses carried by the hand). Partly absent means an articulated object, split into a static parent and a moving child with a joint search (prismatic along the parent axes). Static clusters touched by moving parts are kept (the insertion target); everything else is dropped.</li>
+<li><b>Pixels only</b>: text-prompted masks (Grounding-DINO + SAM2) are fitted by soft-silhouette render-and-compare (pytorch3d) with an unknown camera, a guessed 60° FOV, and metric scale from the URDF alone.</li>
+</ol>
+<h2>Time and how to make it faster</h2>
+<div class="note">For 5 frames × 4 views at 512²: base search plus frame 0 (32 hypotheses) takes about 45 s, then about 7 s per further frame, a backward pass and joint refinement take 15–40 s, and the objects stage takes 25–60 s. That's about 2–3 min per clip on an H100 slice, not counting evaluation and rendering. Faster options:
+<ol>
+<li>A calibrated rig (camera-to-base extrinsics, as RH20T provides) removes the base search. The world-model and real runs here already use this.</li>
+<li>Logged proprioception turns the robot fit into a check.</li>
+<li>Dense video makes this tracking instead of search: 1 warm start and about 50 iterations, roughly 0.1–0.3 s per frame. The multi-starts exist only because the package gives 5 sparse keyframes.</li>
+<li>4× fewer surface samples, <code>torch.compile</code>, and all frames optimised in parallel.</li>
+<li>Moving the object stage's DBSCAN and loops to the GPU.</li>
+</ol>
+Pixels and 3D are complementary. The 3D (depth) term finds the right basin, and a silhouette or photometric term can sharpen the edges at the end. Pixels alone (last rows) fail at metric pose.</div>
+<h2>Sources in the table</h2>
+<div class="note"><b>gt512</b>: the package's simulator observations. <b>gt</b>: the world model's frames of the same episode at its resolution. <b>est_B</b>: real RGB in all 4 views with depth predicted by the world model. <b>roll_B / roll_A</b>: the world model's 1-view → 4-view rollout with predicted depth. The rollout is a forecast, so its errors against simulator GT measure plan versus reality. <b>real</b>: RH20T cfg5 Franka, <code>task_0004_user_0010_scene_0007_cfg_0005</code> ("pick up the small block and move it"), 5 calibrated RealSense views with sensor depth; GT is the logged joint angles. Model inputs and the real scene use the rig calibration (known robot base). <b>_cal</b>: depth self-calibrated (per-frame and per-view scale from the static table and from the robot), with noise-adaptive thresholds.</div>
+<div class="legend" style="margin-top:8px"><span><i style="background:#c7dbfa"></i>robot (URDF)</span><span><i style="background:#ff9e40"></i>free object</span><span><i style="background:#59d98c"></i>articulated child</span><span><i style="background:#bfbfcc"></i>articulated parent</span><span><i style="background:#d9cc8c"></i>static target</span></div>
+</div>
+
+<div class="card">
+<h2 style="margin-top:0">Ablation table <span class="note">(click a row to load it; errors are means over frames; IoU is against the simulator's segmentation of the dynamic parts; “held-out” means cameras not used for fitting)</span></h2>
+<div class="tw"><table id="tab"></table></div>
+<div class="note" id="tabnote" style="margin-top:6px"></div>
+</div>
+
+<div class="grid">
+<div class="card">
+<h2 style="margin-top:0" id="vtitle">3D</h2>
+<canvas id="view"></canvas>
+<div class="ctl">
+<button id="play">Play</button>
+<label>frame <input type="range" id="fr" min="0" max="4" value="0"> <span id="frl"></span></label>
+<label><input type="checkbox" id="pts" checked> observed points</label>
+<label><input type="checkbox" id="mesh" checked> parts</label>
+<label><input type="checkbox" id="robot" checked> robot</label>
+</div>
+<div class="note" id="vinfo"></div>
+</div>
+<div class="card">
+<h2 style="margin-top:0">Renders at the supplied cameras <span class="note">(top row: input, bottom row: reconstruction overlaid; all 4 cameras)</span></h2>
+<video id="vid" controls loop muted playsinline></video>
+<h2>All frames <span class="note">(rows = frames, columns = cameras)</span></h2>
+<img class="ov" id="grid">
+</div>
+</div>
+</main>
+<script src="three.min.js"></script>
+<script src="OrbitControls.js"></script>
+<script src="data/index.js"></script>
+<script>
+const rows = window.__rows || [];
+const f = (x, d = 1) => x == null || isNaN(x) ? "–" : (+x).toFixed(d);
+const cols = [["scene", "scene", "l"], ["src_name", "source", "l"], ["cond_name", "input", "l"],
+  ["robot_mm", "robot surface mm"], ["grip_mm", "gripper mm"], ["joint_deg", "joint err °", 2], ["base_mm", "base mm"],
+  ["peg_mm", "peg chamfer mm"], ["box_mm", "target box mm"], ["axis_deg", "joint axis err °"], ["travel_mm", "travel err mm"],
+  ["iou_used", "IoU fit views", 3], ["iou_held", "IoU held-out", 3], ["agree", "depth agree 1cm", 3], ["agree3", "depth agree 3cm", 3], ["agree_gt", "agree vs real depth", 3], ["secs", "time s", 0]];
+const tab = document.getElementById("tab");
+tab.innerHTML = "<tr>" + cols.map(c => `<th class="${c[2] == 'l' ? 'l' : ''}">${c[1]}</th>`).join("") + "</tr>" +
+  rows.map((r, i) => `<tr class="r" data-i="${i}">` + cols.map(c => c[2] == "l" ? `<td class="l">${r[c[0]] ?? ""}</td>` : `<td>${f(r[c[0]], c[2] ?? 1)}</td>`).join("") + "</tr>").join("");
+tab.querySelectorAll("tr.r").forEach(tr => tr.onclick = () => load(+tr.dataset.i));
+
+// three.js viewer
+const cv = document.getElementById("view");
+const ren = new THREE.WebGLRenderer({canvas: cv, antialias: true});
+ren.setPixelRatio(Math.min(2, window.devicePixelRatio));
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0f1012);
+const cam = new THREE.PerspectiveCamera(45, 1, 0.01, 50);
+cam.up.set(0, 0, 1);
+cam.position.set(1.2, -1.4, 1.0);
+const ctl = new THREE.OrbitControls(cam, cv);
+ctl.target.set(-0.1, 0, 0.2);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 0.9));
+const dl = new THREE.DirectionalLight(0xffffff, 0.7); dl.position.set(1, -1, 2); scene.add(dl);
+const grid = new THREE.GridHelper(2, 20, 0x444444, 0x2a2a2a); grid.rotation.x = Math.PI / 2; scene.add(grid);
+let cur = null, meshes = [], ptsObj = [], frame = 0, playing = false;
+function resize() { const w = cv.clientWidth, h = cv.clientHeight; ren.setSize(w, h, false); cam.aspect = w / h; cam.updateProjectionMatrix(); }
+window.addEventListener("resize", resize);
+const store = {};
+window.__ar = (k, p) => { store[k] = p; };
+function getData(key, cb) {
+  if (store[key]) return cb(store[key]);
+  const s = document.createElement("script");
+  s.src = "data/" + key + "/viewer.js";
+  s.onload = () => cb(store[key]);
+  s.onerror = () => document.getElementById("vinfo").textContent = "could not load " + key;
+  document.head.appendChild(s);
+}
+function clear() { meshes.concat(ptsObj).forEach(o => { scene.remove(o); o.geometry && o.geometry.dispose(); }); meshes = []; ptsObj = []; }
+function build(p) {
+  clear();
+  for (const part of p.parts) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(part.verts, 3));
+    g.setIndex(part.faces);
+    g.computeVertexNormals();
+    const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({color: new THREE.Color(...part.color), roughness: .55, metalness: .05,
+      transparent: part.kind == "articulated_parent", opacity: part.kind == "articulated_parent" ? .55 : 1}));
+    m.matrixAutoUpdate = false; m.userData = part; scene.add(m); meshes.push(m);
+  }
+  if (p.points) for (const fr of p.points) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(fr.xyz, 3));
+    g.setAttribute("color", new THREE.Float32BufferAttribute(fr.rgb.map(c => c / 255), 3));
+    const o = new THREE.Points(g, new THREE.PointsMaterial({size: 0.006, vertexColors: true}));
+    o.visible = false; scene.add(o); ptsObj.push(o);
+  }
+  const fr = document.getElementById("fr"); fr.max = p.frames - 1; fr.value = 0; setFrame(0);
+}
+function setFrame(t) {
+  frame = t; document.getElementById("frl").textContent = `${t + 1}/${cur.frames} (step ${cur.steps[t]})`;
+  const showM = document.getElementById("mesh").checked, showR = document.getElementById("robot").checked;
+  for (const m of meshes) {
+    const P = m.userData.poses[t]; const M = new THREE.Matrix4();
+    M.set(...P); m.matrix.copy(M);
+    m.visible = showM && (showR || m.userData.kind != "robot");
+  }
+  ptsObj.forEach((o, i) => o.visible = document.getElementById("pts").checked && i == t);
+}
+function load(i) {
+  const r = rows[i];
+  document.querySelectorAll("tr.r").forEach(tr => tr.classList.toggle("sel", +tr.dataset.i == i));
+  document.getElementById("vtitle").textContent = `${r.scene} · ${r.src_name} · ${r.cond_name}`;
+  document.getElementById("vinfo").innerHTML = (r.objects || []).map(o => `<span class="pill">${o[0]}: ${o[1]}</span>`).join("") +
+    (r.jtype ? ` <span class="pill">joint: ${r.jtype}</span>` : "");
+  const v = document.getElementById("vid");
+  v.innerHTML = `<source src="data/${r.key}/overlay.webm" type="video/webm"><source src="data/${r.key}/overlay.mp4" type="video/mp4">`;
+  v.load(); v.play().catch(() => {});
+  document.getElementById("grid").src = `data/${r.key}/overlay_grid.jpg`;
+  getData(r.key, p => { cur = p; build(p); });
+}
+document.getElementById("fr").oninput = e => setFrame(+e.target.value);
+["pts", "mesh", "robot"].forEach(id => document.getElementById(id).onchange = () => cur && setFrame(frame));
+document.getElementById("play").onclick = e => { playing = !playing; e.target.textContent = playing ? "Pause" : "Play"; };
+let last = 0;
+function loop(ts) {
+  requestAnimationFrame(loop);
+  if (playing && cur && ts - last > 450) { last = ts; setFrame((frame + 1) % cur.frames); document.getElementById("fr").value = frame; }
+  ctl.update(); ren.render(scene, cam);
+}
+resize(); requestAnimationFrame(loop);
+if (rows.length) load(0);
+</script>
+</body>
+</html>
