@@ -1,0 +1,37 @@
+{
+ "note": "white plate lying on the mat (v2 280,170) is put upright into the wooden dish rack (v2 410,105)",
+ "prompts": [
+  "dish rack",
+  "white plate"
+ ],
+ "objects": [
+  {
+   "name": "plate",
+   "prompt": "white plate",
+   "role": "moved",
+   "shape": "hull",
+   "hint": {
+    "t": 0,
+    "v": 2,
+    "uv": [
+     280,
+     172
+    ]
+   }
+  },
+  {
+   "name": "dish_rack",
+   "prompt": "dish rack",
+   "role": "static",
+   "shape": "container",
+   "hint": {
+    "t": 0,
+    "v": 2,
+    "uv": [
+     440,
+     125
+    ]
+   }
+  }
+ ]
+}

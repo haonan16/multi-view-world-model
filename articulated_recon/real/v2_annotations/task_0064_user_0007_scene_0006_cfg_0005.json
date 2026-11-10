@@ -1,0 +1,22 @@
+{
+ "note": "paper roll standing on the clear acrylic shelf (v2 372,72) is taken down",
+ "prompts": [
+  "toilet paper roll"
+ ],
+ "objects": [
+  {
+   "name": "roll",
+   "prompt": "toilet paper roll",
+   "role": "moved",
+   "shape": "hull",
+   "hint": {
+    "t": 0,
+    "v": 2,
+    "uv": [
+     372,
+     72
+    ]
+   }
+  }
+ ]
+}

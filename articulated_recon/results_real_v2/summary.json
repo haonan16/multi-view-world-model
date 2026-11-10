@@ -1,0 +1,866 @@
+{
+ "summary": {
+  "episodes": 25,
+  "robot_mm_mean": 2.7691466122865673,
+  "robot_mm_median": 2.646319091320038,
+  "robot_mm_max": 3.9521972119808195,
+  "moved_iou_mean": 0.6571778404600747,
+  "moved_f2_mean": 0.8720413776600605,
+  "moved_f2_holdout_mean": null,
+  "moved_iou_holdout_mean": null,
+  "moved_held_ok": 21,
+  "moved_n": 25,
+  "grasp_iou_mean": 0.5608542042752569,
+  "static_iou_mean": 0.7000518024402769
+ },
+ "episodes": [
+  {
+   "ep": "task_0004_user_0010_scene_0007_cfg_0005",
+   "robot_mm": 3.212475633621216,
+   "gripper_mm": 7.81817946434021,
+   "joint_deg": 1.2759898423148934,
+   "objects": {
+    "cube_moved": {
+     "role": "moved",
+     "iou": 0.5835715050146387,
+     "iou_holdout": null,
+     "f2": 0.861170772243862,
+     "f2_holdout": null,
+     "depth1": 0.3976165758009281,
+     "contact": 1.3141232642308425,
+     "pen": 1.900315254293212,
+     "held": 8,
+     "grasp_iou": 0.7777777777777778,
+     "ext": [
+      25.5,
+      35.9,
+      24.7
+     ],
+     "travel": 39.85611787227152
+    },
+    "cube_static": {
+     "role": "static",
+     "iou": 0.7032973217532105,
+     "iou_holdout": null,
+     "f2": 0.9096705286449602,
+     "f2_holdout": null,
+     "depth1": 0.34700412678952336,
+     "contact": 5.56921494594949,
+     "pen": 0.0,
+     "held": 0,
+     "grasp_iou": null,
+     "ext": [
+      46.4,
+      43.7,
+      37.5
+     ],
+     "travel": 0.0
+    }
+   }
+  },
+  {
+   "ep": "task_0004_user_0010_scene_0010_cfg_0005",
+   "robot_mm": 2.4483968198299406,
+   "gripper_mm": 7.226588773727417,
+   "joint_deg": 0.8926451800999308,
+   "objects": {
+    "cube_moved": {
+     "role": "moved",
+     "iou": 0.5898722610520174,
+     "iou_holdout": null,
+     "f2": 0.8897088265606292,
+     "f2_holdout": null,
+     "depth1": 0.4599623166179128,
+     "contact": 0.6589897233408709,
+     "pen": 1.2591110749332226,
+     "held": 5,
+     "grasp_iou": 0.375,
+     "ext": [
+      18.8,
+      20.5,
+      16.2
+     ],
+     "travel": 31.906895054925766
+    }
+   }
+  },
+  {
+   "ep": "task_0006_user_0010_scene_0003_cfg_0005",
+   "robot_mm": 2.4564156234264374,
+   "gripper_mm": 6.754049921035767,
+   "joint_deg": 1.0192946189774743,
+   "objects": {
+    "cube_pushed": {
+     "role": "moved",
+     "iou": 0.7427165069828693,
+     "iou_holdout": null,
+     "f2": 0.932273389535365,
+     "f2_holdout": null,
+     "depth1": 0.6408576194400166,
+     "contact": 1.4380341386112552,
+     "pen": 1.3930399990176698,
+     "held": 0,
+     "grasp_iou": null,
+     "ext": [
+      43.3,
+      50.0,
+      43.1
+     ],
+     "travel": 33.481864888194806
+    }
+   }
+  },
+  {
+   "ep": "task_0008_user_0010_scene_0004_cfg_0005",
+   "robot_mm": 3.12381591796875,
+   "gripper_mm": 7.434494376182556,
+   "joint_deg": 0.9750757651397922,
+   "objects": {
+    "cube_moved": {
+     "role": "moved",
+     "iou": 0.7199008948775579,
+     "iou_holdout": null,
+     "f2": 0.9219633014406048,
+     "f2_holdout": null,
+     "depth1": 0.6326545362895776,
+     "contact": 2.1127853180393696,
+     "pen": 0.5585914221160858,
+     "held": 9,
+     "grasp_iou": 0.5555555555555556,
+     "ext": [
+      48.0,
+      45.9,
+      37.8
+     ],
+     "travel": 19.330865837011395
+    }
+   }
+  },
+  {
+   "ep": "task_0010_user_0007_scene_0009_cfg_0005",
+   "robot_mm": 2.529042291641235,
+   "gripper_mm": 5.363295209407807,
+   "joint_deg": 0.9171141478281299,
+   "objects": {
+    "handset": {
+     "role": "moved",
+     "iou": 0.6202629850225655,
+     "iou_holdout": null,
+     "f2": 0.8285503165679635,
+     "f2_holdout": null,
+     "depth1": 0.12842131690467046,
+     "contact": 6.221320729839359,
+     "pen": 1.5959880101461206,
+     "held": 10,
+     "grasp_iou": 0.8,
+     "ext": [
+      155.4,
+      19.6,
+      26.2
+     ],
+     "travel": 17.46201110173079
+    },
+    "phone_base": {
+     "role": "static",
+     "iou": 0.7662529730948167,
+     "iou_holdout": null,
+     "f2": 0.9000066092166381,
+     "f2_holdout": null,
+     "depth1": 0.37770055311276424,
+     "contact": 4.23150627448301,
+     "pen": 0.0,
+     "held": 0,
+     "grasp_iou": null,
+     "ext": [
+      139.4,
+      194.4,
+      36.1
+     ],
+     "travel": 0.0
+    }
+   }
+  },
+  {
+   "ep": "task_0012_user_0010_scene_0004_cfg_0005",
+   "robot_mm": 2.9398849248886108,
+   "gripper_mm": 7.337237811088562,
+   "joint_deg": 1.3379875501968104,
+   "objects": {
+    "ball": {
+     "role": "moved",
+     "iou": 0.6291115807007135,
+     "iou_holdout": null,
+     "f2": 0.8913368277722286,
+     "f2_holdout": null,
+     "depth1": 0.4769222972916207,
+     "contact": 3.4129185886167592,
+     "pen": 0.07681075197795134,
+     "held": 0,
+     "grasp_iou": null,
+     "ext": [
+      33.4,
+      33.4,
+      33.4
+     ],
+     "travel": 29.328905173101816
+    },
+    "goal": {
+     "role": "static",
+     "iou": 0.802988599791989,
+     "iou_holdout": null,
+     "f2": 0.9562620343874247,
+     "f2_holdout": null,
+     "depth1": 0.2850671255556327,
+     "contact": 0.5524230795645165,
+     "pen": 0.0,
+     "held": 0,
+     "grasp_iou": null,
+     "ext": [
+      110.1,
+      20.9,
+      67.7
+     ],
+     "travel": 0.0
+    }
+   }
+  },
+  {
+   "ep": "task_0014_user_0007_scene_0006_cfg_0005",
+   "robot_mm": 3.1369581878185273,
+   "gripper_mm": 5.32036725282669,
+   "joint_deg": 1.1101627547564508,
+   "objects": {
+    "block": {
+     "role": "moved",
+     "iou": 0.6880735582824028,
+     "iou_holdout": null,
+     "f2": 0.8921199206071999,
+     "f2_holdout": null,
+     "depth1": 0.650471228091209,
+     "contact": 0.29318902804456837,
+     "pen": 0.0,
+     "held": 8,
+     "grasp_iou": 0.75,
+     "ext": [
+      51.1,
+      58.1,
+      50.5
+     ],
+     "travel": 12.660578016962331
+    }
+   }
+  },
+  {
+   "ep": "task_0016_user_0010_scene_0005_cfg_0005",
+   "robot_mm": 3.5416200399398803,
+   "gripper_mm": 7.848179960250855,
+   "joint_deg": 1.6700713151796596,
+   "objects": {
+    "cue": {
+     "role": "moved",
+     "iou": 0.4722529956773997,
+     "iou_holdout": null,
+     "f2": 0.7442117533031646,
+     "f2_holdout": null,
+     "depth1": 0.14537530118908565,
+     "contact": 0.6696090398967006,
+     "pen": 0.0,
+     "held": 13,
+     "grasp_iou": 0.9230769230769231,
+     "ext": [
+      14.0,
+      324.7,
+      33.5
+     ],
+     "travel": 3.8421887725196515
+    },
+    "pool_table": {
+     "role": "static",
+     "iou": 0.8550472620471102,
+     "iou_holdout": null,
+     "f2": 0.9475215788401583,
+     "f2_holdout": null,
+     "depth1": 0.3280767338221425,
+     "contact": 1.9012081785020074,
+     "pen": 0.0,
+     "held": 0,
+     "grasp_iou": null,
+     "ext": [
+      338.7,
+      225.8,
+      19.2
+     ],
+     "travel": 0.0
+    }
+   }
+  },
+  {
+   "ep": "task_0017_user_0010_scene_0003_cfg_0005",
+   "robot_mm": 3.487361353635788,
+   "gripper_mm": 5.9777019739151,
+   "joint_deg": 1.0044808581440532,
+   "objects": {
+    "marker": {
+     "role": "moved",
+     "iou": 0.4939221509600276,
+     "iou_holdout": null,
+     "f2": 0.8067796593445729,
+     "f2_holdout": null,
+     "depth1": 0.1836255654551987,
+     "contact": 25.523454511806968,
+     "pen": 1.1480667469393724,
+     "held": 2,
+     "grasp_iou": 0.16666666666666666,
+     "ext": [
+      12.9,
+      141.1,
+      18.2
+     ],
+     "travel": 3.5578054810999062
+    },
+    "pen_holder": {
+     "role": "static",
+     "iou": 0.668661410297953,
+     "iou_holdout": null,
+     "f2": 0.8852437006705831,
+     "f2_holdout": null,
+     "depth1": 0.09045862870999144,
+     "contact": 3.5857936492709057,
+     "pen": 0.0,
+     "held": 0,
+     "grasp_iou": null,
+     "ext": [
+      76.6,
+      81.3,
+      121.2
+     ],
+     "travel": 0.0
+    }
+   }
+  },
+  {
+   "ep": "task_0035_user_0007_scene_0001_cfg_0005",
+   "robot_mm": 2.9773811399936676,
+   "gripper_mm": 6.38594274520874,
+   "joint_deg": 1.488803371171042,
+   "objects": {
+    "block": {
+     "role": "moved",
+     "iou": 0.6476817479028644,
+     "iou_holdout": null,
+     "f2": 0.8783436926868963,
+     "f2_holdout": null,
+     "depth1": 0.5254164727336428,
+     "contact": 1.1534047854402179,
+     "pen": 1.5543657542281992,
+     "held": 9,
+     "grasp_iou": 0.4444444444444444,
+     "ext": [
+      46.4,
+      42.7,
+      47.0
+     ],
+     "travel": 10.247346193554732
+    }
+   }
+  },
+  {
+   "ep": "task_0038_user_0007_scene_0004_cfg_0005",
+   "robot_mm": 3.0091199398040773,
+   "gripper_mm": 6.492003977298737,
+   "joint_deg": 0.9147541930085673,
+   "objects": {
+    "cup": {
+     "role": "moved",
+     "iou": 0.7587721414331379,
+     "iou_holdout": null,
+     "f2": 0.9317215261459258,
+     "f2_holdout": null,
+     "depth1": 0.3781562074247429,
+     "contact": 0.5026163638211516,
+     "pen": 0.9783264324125466,
+     "held": 2,
+     "grasp_iou": null,
+     "ext": [
+      69.3,
+      74.1,
+      91.0
+     ],
+     "travel": 19.511696844075725
+    }
+   }
+  },
+  {
+   "ep": "task_0046_user_0010_scene_0005_cfg_0005",
+   "robot_mm": 2.3303442776203154,
+   "gripper_mm": 5.1759403347969055,
+   "joint_deg": 0.9345452820958096,
+   "objects": {
+    "glass_cup": {
+     "role": "moved",
+     "iou": 0.6339458471031763,
+     "iou_holdout": null,
+     "f2": 0.8479600858847084,
+     "f2_holdout": null,
+     "depth1": 0.1573318446266493,
+     "contact": 3.0129329148143764,
+     "pen": 0.7015538535943942,
+     "held": 8,
+     "grasp_iou": 0.7777777777777778,
+     "ext": [
+      105.5,
+      69.6,
+      117.0
+     ],
+     "travel": 40.048239745846146
+    },
+    "cup_rack": {
+     "role": "static",
+     "iou": 0.6059390053172933,
+     "iou_holdout": null,
+     "f2": 0.8284090890877227,
+     "f2_holdout": null,
+     "depth1": 0.04464175254202992,
+     "contact": 7.3862120321627085,
+     "pen": 0.0,
+     "held": 0,
+     "grasp_iou": null,
+     "ext": [
+      170.2,
+      94.8,
+      152.3
+     ],
+     "travel": 0.0
+    }
+   }
+  },
+  {
+   "ep": "task_0047_user_0007_scene_0001_cfg_0005",
+   "robot_mm": 2.822713077068329,
+   "gripper_mm": 6.574064838886261,
+   "joint_deg": 1.3207322024864028,
+   "objects": {
+    "cup": {
+     "role": "moved",
+     "iou": 0.663574071476131,
+     "iou_holdout": null,
+     "f2": 0.8731547596806968,
+     "f2_holdout": null,
+     "depth1": 0.5178797538897808,
+     "contact": 0.7080806194935756,
+     "pen": 0.0,
+     "held": 8,
+     "grasp_iou": 0.5,
+     "ext": [
+      70.6,
+      73.7,
+      79.6
+     ],
+     "travel": 12.013955668727144
+    }
+   }
+  },
+  {
+   "ep": "task_0050_user_0007_scene_0002_cfg_0005",
+   "robot_mm": 2.4022174417972564,
+   "gripper_mm": 6.477399700880051,
+   "joint_deg": 1.0572684061149922,
+   "objects": {
+    "plate": {
+     "role": "moved",
+     "iou": 0.8767142049807287,
+     "iou_holdout": null,
+     "f2": 0.9675765685984549,
+     "f2_holdout": null,
+     "depth1": 0.26946388102913293,
+     "contact": 47.609539509867744,
+     "pen": 1.5321825085913054,
+     "held": 2,
+     "grasp_iou": null,
+     "ext": [
+      195.0,
+      191.4,
+      18.5
+     ],
+     "travel": 13.31288086859835
+    }
+   }
+  },
+  {
+   "ep": "task_0051_user_0007_scene_0001_cfg_0005",
+   "robot_mm": 3.174332872033119,
+   "gripper_mm": 6.6884185671806335,
+   "joint_deg": 1.0217640174826919,
+   "objects": {
+    "dish": {
+     "role": "moved",
+     "iou": 0.6820979655910423,
+     "iou_holdout": null,
+     "f2": 0.8725661727103424,
+     "f2_holdout": null,
+     "depth1": 0.20531998967225615,
+     "contact": 34.785013867431246,
+     "pen": 1.3523839144418721,
+     "held": 1,
+     "grasp_iou": null,
+     "ext": [
+      153.0,
+      203.6,
+      31.7
+     ],
+     "travel": 11.923254261360665
+    }
+   }
+  },
+  {
+   "ep": "task_0064_user_0007_scene_0006_cfg_0005",
+   "robot_mm": 2.3893592715263368,
+   "gripper_mm": 6.400090861320495,
+   "joint_deg": 1.056763271524916,
+   "objects": {
+    "roll": {
+     "role": "moved",
+     "iou": 0.7275630200829318,
+     "iou_holdout": null,
+     "f2": 0.8963190677931017,
+     "f2_holdout": null,
+     "depth1": 0.3796575790418346,
+     "contact": 7.785036136267321,
+     "pen": 1.5370464768099628,
+     "held": 0,
+     "grasp_iou": 0.0,
+     "ext": [
+      98.2,
+      46.5,
+      52.9
+     ],
+     "travel": 20.05306752920626
+    }
+   }
+  },
+  {
+   "ep": "task_0088_user_0007_scene_0007_cfg_0005",
+   "robot_mm": 2.7654862225055696,
+   "gripper_mm": 5.8835310459136965,
+   "joint_deg": 1.0643031131380716,
+   "objects": {
+    "cube": {
+     "role": "moved",
+     "iou": 0.6855945436383187,
+     "iou_holdout": null,
+     "f2": 0.8962878782343919,
+     "f2_holdout": null,
+     "depth1": 0.49051149935632726,
+     "contact": 1.8688636412177082,
+     "pen": 1.3892577288433199,
+     "held": 8,
+     "grasp_iou": 0.875,
+     "ext": [
+      48.0,
+      47.7,
+      43.8
+     ],
+     "travel": 25.646482176253127
+    },
+    "cardboard_box": {
+     "role": "static",
+     "iou": 0.8153881227649487,
+     "iou_holdout": null,
+     "f2": 0.9357129141188743,
+     "f2_holdout": null,
+     "depth1": 0.34795322228054615,
+     "contact": 16.379756184358797,
+     "pen": 0.0,
+     "held": 0,
+     "grasp_iou": null,
+     "ext": [
+      154.2,
+      111.7,
+      122.4
+     ],
+     "travel": 0.0
+    }
+   }
+  },
+  {
+   "ep": "task_0091_user_0007_scene_0001_cfg_0005",
+   "robot_mm": 2.646319091320038,
+   "gripper_mm": 5.530357050895691,
+   "joint_deg": 1.0305487645916158,
+   "objects": {
+    "cube": {
+     "role": "moved",
+     "iou": 0.6979624107950506,
+     "iou_holdout": null,
+     "f2": 0.9000024180729274,
+     "f2_holdout": null,
+     "depth1": 0.504717123358113,
+     "contact": 1.3208371859855081,
+     "pen": 0.0,
+     "held": 11,
+     "grasp_iou": 0.5454545454545454,
+     "ext": [
+      58.1,
+      57.9,
+      47.8
+     ],
+     "travel": 19.115818176445025
+    },
+    "pink_tray": {
+     "role": "static",
+     "iou": 0.7878426396479787,
+     "iou_holdout": null,
+     "f2": 0.9211098712157011,
+     "f2_holdout": null,
+     "depth1": 0.47815428455469366,
+     "contact": 6.126970146815512,
+     "pen": 0.0,
+     "held": 0,
+     "grasp_iou": null,
+     "ext": [
+      150.5,
+      146.2,
+      60.3
+     ],
+     "travel": 0.0
+    },
+    "blue_tray": {
+     "role": "static",
+     "iou": 0.7806062160662782,
+     "iou_holdout": null,
+     "f2": 0.9204564224819722,
+     "f2_holdout": null,
+     "depth1": 0.4962256633181554,
+     "contact": 2.4578850486860193,
+     "pen": 0.42575423162190956,
+     "held": 0,
+     "grasp_iou": null,
+     "ext": [
+      143.1,
+      138.4,
+      69.3
+     ],
+     "travel": 0.0
+    }
+   }
+  },
+  {
+   "ep": "task_0123_user_0007_scene_0005_cfg_0005",
+   "robot_mm": 2.2722172111272814,
+   "gripper_mm": 5.462911522388458,
+   "joint_deg": 0.828347638772328,
+   "objects": {
+    "knife": {
+     "role": "moved",
+     "iou": 0.32870490147296744,
+     "iou_holdout": null,
+     "f2": 0.5902400470303802,
+     "f2_holdout": null,
+     "depth1": 0.07960876648489072,
+     "contact": 5.9279124777042345,
+     "pen": 2.7951390310069986,
+     "held": 2,
+     "grasp_iou": 0.0,
+     "ext": [
+      267.8,
+      72.8,
+      49.6
+     ],
+     "travel": 28.43868226501022
+    },
+    "rack": {
+     "role": "static",
+     "iou": 0.4214129489035699,
+     "iou_holdout": null,
+     "f2": 0.7040081124639541,
+     "f2_holdout": null,
+     "depth1": 0.24276048553769802,
+     "contact": 5.600064391607203,
+     "pen": 0.0,
+     "held": 0,
+     "grasp_iou": null,
+     "ext": [
+      169.9,
+      143.1,
+      50.4
+     ],
+     "travel": 0.0
+    }
+   }
+  },
+  {
+   "ep": "task_0222_user_0010_scene_0003_cfg_0005",
+   "robot_mm": 2.527045726776123,
+   "gripper_mm": 5.191392540931702,
+   "joint_deg": 0.967224450624605,
+   "objects": {
+    "lid": {
+     "role": "moved",
+     "iou": 0.7994144549087385,
+     "iou_holdout": null,
+     "f2": 0.919011492946177,
+     "f2_holdout": null,
+     "depth1": 0.053211862152800375,
+     "contact": 4.692389919515206,
+     "pen": 1.8855289995249784,
+     "held": 12,
+     "grasp_iou": 0.8333333333333334,
+     "ext": [
+      56.2,
+      43.7,
+      81.5
+     ],
+     "travel": 38.056041498391394
+    },
+    "pan": {
+     "role": "static",
+     "iou": 0.4931333271578968,
+     "iou_holdout": null,
+     "f2": 0.6892920528367273,
+     "f2_holdout": null,
+     "depth1": 0.1567605872214824,
+     "contact": 6.953873565460798,
+     "pen": 0.0,
+     "held": 0,
+     "grasp_iou": null,
+     "ext": [
+      281.6,
+      486.8,
+      107.9
+     ],
+     "travel": 0.0
+    }
+   }
+  },
+  {
+   "ep": "task_0004_user_0020_scene_0006_cfg_0005",
+   "robot_mm": 2.254227024316788,
+   "gripper_mm": 4.601917719841003,
+   "joint_deg": 0.9018311815343718,
+   "objects": {
+    "cube": {
+     "role": "moved",
+     "iou": 0.5716384164447632,
+     "iou_holdout": null,
+     "f2": 0.8516257457902424,
+     "f2_holdout": null,
+     "depth1": 0.47344995343608653,
+     "contact": 1.5290429548173492,
+     "pen": 1.3770046085423868,
+     "held": 7,
+     "grasp_iou": 0.875,
+     "ext": [
+      20.9,
+      26.1,
+      33.8
+     ],
+     "travel": 52.90399083874968
+    }
+   }
+  },
+  {
+   "ep": "task_0038_user_0007_scene_0007_cfg_0005",
+   "robot_mm": 2.026968467235565,
+   "gripper_mm": 5.063745224475861,
+   "joint_deg": 0.9185079009191414,
+   "objects": {
+    "cup": {
+     "role": "moved",
+     "iou": 0.7751538914197477,
+     "iou_holdout": null,
+     "f2": 0.9339159569426969,
+     "f2_holdout": null,
+     "depth1": 0.2524686569003055,
+     "contact": 3.568401437924863,
+     "pen": 1.2508684686391893,
+     "held": 1,
+     "grasp_iou": null,
+     "ext": [
+      75.3,
+      76.1,
+      94.3
+     ],
+     "travel": 19.65426200514606
+    }
+   }
+  },
+  {
+   "ep": "task_0047_user_0007_scene_0003_cfg_0005",
+   "robot_mm": 3.9521972119808195,
+   "gripper_mm": 8.374616539478302,
+   "joint_deg": 1.7107831202523287,
+   "objects": {
+    "cup": {
+     "role": "moved",
+     "iou": 0.6792763631504827,
+     "iou_holdout": null,
+     "f2": 0.876356052282229,
+     "f2_holdout": null,
+     "depth1": 0.44876337777906705,
+     "contact": 0.33363044232980615,
+     "pen": 0.0,
+     "held": 10,
+     "grasp_iou": 0.6,
+     "ext": [
+      43.7,
+      37.0,
+      72.6
+     ],
+     "travel": 11.748395890648156
+    }
+   }
+  },
+  {
+   "ep": "task_0008_user_0010_scene_0005_cfg_0005",
+   "robot_mm": 2.49117796421051,
+   "gripper_mm": 6.382176530361176,
+   "joint_deg": 0.9329362698501693,
+   "objects": {
+    "cube_moved": {
+     "role": "moved",
+     "iou": 0.6222503910141476,
+     "iou_holdout": null,
+     "f2": 0.9000986352041002,
+     "f2_holdout": null,
+     "depth1": 0.48495053161779855,
+     "contact": 1.3017805573707988,
+     "pen": 1.1280081458940336,
+     "held": 7,
+     "grasp_iou": 0.8571428571428571,
+     "ext": [
+      27.0,
+      27.2,
+      28.6
+     ],
+     "travel": 29.542130456952272
+    }
+   }
+  },
+  {
+   "ep": "task_0051_user_0007_scene_0002_cfg_0005",
+   "robot_mm": 2.3115875750780104,
+   "gripper_mm": 5.185045832395554,
+   "joint_deg": 0.9296356333417413,
+   "objects": {
+    "plate": {
+     "role": "moved",
+     "iou": 0.7394172015174454,
+     "iou_holdout": null,
+     "f2": 0.8977395741226519,
+     "f2_holdout": null,
+     "depth1": 0.2873084544129985,
+     "contact": 97.36712774283964,
+     "pen": 0.0,
+     "held": 0,
+     "grasp_iou": 0.0,
+     "ext": [
+      170.4,
+      122.8,
+      24.6
+     ],
+     "travel": 31.809309965018574
+    }
+   }
+  }
+ ]
+}

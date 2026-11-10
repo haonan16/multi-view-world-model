@@ -1,0 +1,37 @@
+{
+ "note": "wooden block on the kitchen scale (v2 335,145) is taken off to the table (v2 282,105)",
+ "prompts": [
+  "electronic scale",
+  "wooden block"
+ ],
+ "objects": [
+  {
+   "name": "block",
+   "prompt": "wooden block",
+   "role": "moved",
+   "shape": "box",
+   "hint": {
+    "t": 0,
+    "v": 2,
+    "uv": [
+     335,
+     145
+    ]
+   }
+  },
+  {
+   "name": "scale",
+   "prompt": "electronic scale",
+   "role": "static",
+   "shape": "box",
+   "hint": {
+    "t": 0,
+    "v": 2,
+    "uv": [
+     340,
+     170
+    ]
+   }
+  }
+ ]
+}

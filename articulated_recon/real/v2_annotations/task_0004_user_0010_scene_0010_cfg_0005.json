@@ -1,0 +1,22 @@
+{
+ "note": "small cube moved from the left (v1 148,205) to the right (v1 298,268); the large cube and the other small cube stay",
+ "prompts": [
+  "wooden cube"
+ ],
+ "objects": [
+  {
+   "name": "cube_moved",
+   "prompt": "wooden cube",
+   "role": "moved",
+   "shape": "box",
+   "hint": {
+    "t": 0,
+    "v": 1,
+    "uv": [
+     148,
+     205
+    ]
+   }
+  }
+ ]
+}

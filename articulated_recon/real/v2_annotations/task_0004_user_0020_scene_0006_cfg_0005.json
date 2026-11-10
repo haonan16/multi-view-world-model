@@ -1,0 +1,22 @@
+{
+ "note": "small wooden cube (v2 272,268) is moved to the far right (v2 390,68)",
+ "prompts": [
+  "small wooden cube"
+ ],
+ "objects": [
+  {
+   "name": "cube",
+   "prompt": "small wooden cube",
+   "role": "moved",
+   "shape": "box",
+   "hint": {
+    "t": 0,
+    "v": 2,
+    "uv": [
+     272,
+     268
+    ]
+   }
+  }
+ ]
+}

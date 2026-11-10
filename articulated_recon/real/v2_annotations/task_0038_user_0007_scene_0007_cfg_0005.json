@@ -1,0 +1,22 @@
+{
+ "note": "green cup on the mat (v1 440,300) is picked up",
+ "prompts": [
+  "green cup"
+ ],
+ "objects": [
+  {
+   "name": "cup",
+   "prompt": "green cup",
+   "role": "moved",
+   "shape": "hull",
+   "hint": {
+    "t": 0,
+    "v": 1,
+    "uv": [
+     440,
+     298
+    ]
+   }
+  }
+ ]
+}

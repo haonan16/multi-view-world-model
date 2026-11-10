@@ -1,0 +1,37 @@
+{
+ "note": "kitchen knife lying on the table (v1 330,320) is put into the wooden rack (v1 ~200,190)",
+ "prompts": [
+  "kitchen knife",
+  "wooden rack"
+ ],
+ "objects": [
+  {
+   "name": "knife",
+   "prompt": "kitchen knife",
+   "role": "moved",
+   "shape": "box",
+   "hint": {
+    "t": 0,
+    "v": 1,
+    "uv": [
+     330,
+     318
+    ]
+   }
+  },
+  {
+   "name": "rack",
+   "prompt": "wooden rack",
+   "role": "static",
+   "shape": "container",
+   "hint": {
+    "t": 0,
+    "v": 1,
+    "uv": [
+     195,
+     200
+    ]
+   }
+  }
+ ]
+}

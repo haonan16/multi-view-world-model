@@ -1,0 +1,37 @@
+{
+ "note": "white plate standing in the wooden rack (v2 325,215) is taken out and laid on the mat (v2 390,110)",
+ "prompts": [
+  "white plate",
+  "wooden dish rack"
+ ],
+ "objects": [
+  {
+   "name": "plate",
+   "prompt": "white plate",
+   "role": "moved",
+   "shape": "hull",
+   "hint": {
+    "t": 0,
+    "v": 2,
+    "uv": [
+     325,
+     215
+    ]
+   }
+  },
+  {
+   "name": "dish_rack",
+   "prompt": "wooden dish rack",
+   "role": "static",
+   "shape": "container",
+   "hint": {
+    "t": 0,
+    "v": 2,
+    "uv": [
+     300,
+     285
+    ]
+   }
+  }
+ ]
+}

@@ -1,0 +1,52 @@
+{
+ "note": "wooden cube in the pink tray (v2 360,168) is moved into the light-blue tray (v2 400,95)",
+ "prompts": [
+  "light blue box",
+  "pink box",
+  "wooden cube"
+ ],
+ "objects": [
+  {
+   "name": "cube",
+   "prompt": "wooden cube",
+   "role": "moved",
+   "shape": "box",
+   "hint": {
+    "t": 0,
+    "v": 2,
+    "uv": [
+     360,
+     168
+    ]
+   }
+  },
+  {
+   "name": "pink_tray",
+   "prompt": "pink box",
+   "role": "static",
+   "shape": "container",
+   "hint": {
+    "t": 0,
+    "v": 2,
+    "uv": [
+     318,
+     205
+    ]
+   }
+  },
+  {
+   "name": "blue_tray",
+   "prompt": "light blue box",
+   "role": "static",
+   "shape": "container",
+   "hint": {
+    "t": 0,
+    "v": 2,
+    "uv": [
+     400,
+     75
+    ]
+   }
+  }
+ ]
+}

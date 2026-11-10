@@ -1,0 +1,37 @@
+{
+ "note": "wooden cube (v2 382,160) is picked over the open cardboard box (obstacle) and placed on its far side (v1 ~340,190)",
+ "prompts": [
+  "open cardboard box",
+  "wooden cube"
+ ],
+ "objects": [
+  {
+   "name": "cube",
+   "prompt": "wooden cube",
+   "role": "moved",
+   "shape": "box",
+   "hint": {
+    "t": 0,
+    "v": 2,
+    "uv": [
+     382,
+     160
+    ]
+   }
+  },
+  {
+   "name": "cardboard_box",
+   "prompt": "open cardboard box",
+   "role": "static",
+   "shape": "container",
+   "hint": {
+    "t": 0,
+    "v": 2,
+    "uv": [
+     300,
+     140
+    ]
+   }
+  }
+ ]
+}

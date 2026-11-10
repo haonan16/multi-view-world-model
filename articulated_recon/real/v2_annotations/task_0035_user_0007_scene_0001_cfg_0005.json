@@ -1,0 +1,22 @@
+{
+ "note": "small wooden block (v2 363,140) is picked up and held",
+ "prompts": [
+  "small wooden block"
+ ],
+ "objects": [
+  {
+   "name": "block",
+   "prompt": "small wooden block",
+   "role": "moved",
+   "shape": "box",
+   "hint": {
+    "t": 0,
+    "v": 2,
+    "uv": [
+     363,
+     140
+    ]
+   }
+  }
+ ]
+}

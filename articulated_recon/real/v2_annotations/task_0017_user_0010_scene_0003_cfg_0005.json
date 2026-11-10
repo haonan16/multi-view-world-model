@@ -1,0 +1,37 @@
+{
+ "note": "marker lying across the black pen holder (v2 335,170) is put upright into it",
+ "prompts": [
+  "black pen holder cup",
+  "marker pen"
+ ],
+ "objects": [
+  {
+   "name": "marker",
+   "prompt": "marker pen",
+   "role": "moved",
+   "shape": "box",
+   "hint": {
+    "t": 0,
+    "v": 2,
+    "uv": [
+     335,
+     170
+    ]
+   }
+  },
+  {
+   "name": "pen_holder",
+   "prompt": "black pen holder cup",
+   "role": "static",
+   "shape": "hull",
+   "hint": {
+    "t": 0,
+    "v": 2,
+    "uv": [
+     365,
+     212
+    ]
+   }
+  }
+ ]
+}

@@ -29,8 +29,11 @@ def to_meshes(parts, dev="cuda"):
     return join_meshes_as_scene(ms)
 
 
-def render(parts, K, w2c, H, W, dev="cuda"):
+def render(parts, K, w2c, H, W, dev=None):
     """-> rgb [H,W,3] float, alpha [H,W] bool, depth [H,W] (0 = empty), part id map [H,W] (-1 empty)"""
+    if dev is None:
+        from .p3d_compat import NATIVE
+        dev = "cuda" if NATIVE else "cpu"
     mesh = to_meshes(parts, dev)
     c = cam(K, w2c, H, W, dev)
     rs = RasterizationSettings(image_size=(H, W), blur_radius=0.0, faces_per_pixel=1, bin_size=0)
@@ -68,7 +71,11 @@ def scene_parts(robot, res, t, decimate=None):
     for l, m in robot.meshes_at(res["robot"]["q"][t], res["robot"]["base"]):
         parts.append((m, PALETTE["robot"], f"robot/{l}"))
     for ob in res["objects"]:
-        if ob["type"] == "articulated":
+        if ob.get("mesh") is not None:
+            m = trimesh.Trimesh(ob["mesh"][0], ob["mesh"][1], process=False)
+            m.apply_transform(ob["poses"][t])
+            parts.append((m, PALETTE.get(ob["type"], PALETTE["free"]), ob["name"]))
+        elif ob["type"] == "articulated":
             from .objects import part_boxes
             for Tb, hb in part_boxes(ob["parent"]["pose"], ob["parent"]["half"], ob["parent"].get("slabs")):
                 parts.append((box_mesh(hb, Tb), PALETTE["articulated_parent"], ob["name"] + "/parent"))

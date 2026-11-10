@@ -1,0 +1,37 @@
+{
+ "note": "glass lid with a black knob (v2 295,290) is put on the frying pan (v2 ~380,105)",
+ "prompts": [
+  "black frying pan",
+  "glass pot lid"
+ ],
+ "objects": [
+  {
+   "name": "lid",
+   "prompt": "glass pot lid",
+   "role": "moved",
+   "shape": "hull",
+   "hint": {
+    "t": 0,
+    "v": 2,
+    "uv": [
+     295,
+     290
+    ]
+   }
+  },
+  {
+   "name": "pan",
+   "prompt": "black frying pan",
+   "role": "static",
+   "shape": "hull",
+   "hint": {
+    "t": 0,
+    "v": 2,
+    "uv": [
+     330,
+     100
+    ]
+   }
+  }
+ ]
+}

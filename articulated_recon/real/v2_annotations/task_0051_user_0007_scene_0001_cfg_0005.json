@@ -1,0 +1,37 @@
+{
+ "note": "woven basket dish standing in the wooden rack (v2 300,180) is taken out and laid on the mat (v2 370,110)",
+ "prompts": [
+  "dish rack",
+  "woven basket"
+ ],
+ "objects": [
+  {
+   "name": "dish",
+   "prompt": "woven basket",
+   "role": "moved",
+   "shape": "hull",
+   "hint": {
+    "t": 0,
+    "v": 2,
+    "uv": [
+     300,
+     180
+    ]
+   }
+  },
+  {
+   "name": "dish_rack",
+   "prompt": "dish rack",
+   "role": "static",
+   "shape": "container",
+   "hint": {
+    "t": 0,
+    "v": 2,
+    "uv": [
+     270,
+     262
+    ]
+   }
+  }
+ ]
+}

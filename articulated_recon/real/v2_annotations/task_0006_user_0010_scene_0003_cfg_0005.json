@@ -1,0 +1,23 @@
+{
+ "note": "wooden cube pushed from v1 (215,155) to v1 (345,240); Rubik's cube static",
+ "prompts": [
+  "wooden cube"
+ ],
+ "objects": [
+  {
+   "name": "cube_pushed",
+   "prompt": "wooden cube",
+   "role": "moved",
+   "shape": "box",
+   "hint": {
+    "t": 0,
+    "v": 1,
+    "uv": [
+     215,
+     155
+    ]
+   },
+   "mode": "push"
+  }
+ ]
+}

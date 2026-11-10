@@ -1,0 +1,22 @@
+{
+ "note": "green cup hanging on the black rack (v2 338,88) is taken off and put on the mat (v2 380,120)",
+ "prompts": [
+  "green cup"
+ ],
+ "objects": [
+  {
+   "name": "cup",
+   "prompt": "green cup",
+   "role": "moved",
+   "shape": "hull",
+   "hint": {
+    "t": 0,
+    "v": 2,
+    "uv": [
+     338,
+     88
+    ]
+   }
+  }
+ ]
+}

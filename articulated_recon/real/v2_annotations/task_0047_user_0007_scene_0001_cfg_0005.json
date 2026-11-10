@@ -1,0 +1,22 @@
+{
+ "note": "blue cup is taken off the black rack (v2 410,80) and put on the mat (v2 382,135)",
+ "prompts": [
+  "blue cup"
+ ],
+ "objects": [
+  {
+   "name": "cup",
+   "prompt": "blue cup",
+   "role": "moved",
+   "shape": "hull",
+   "hint": {
+    "t": 0,
+    "v": 2,
+    "uv": [
+     410,
+     82
+    ]
+   }
+  }
+ ]
+}

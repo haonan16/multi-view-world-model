@@ -1,0 +1,37 @@
+{
+ "note": "transparent measuring cup (v2 285,300) is hung on the black cup rack (v2 ~360,95)",
+ "prompts": [
+  "black cup rack",
+  "transparent glass cup"
+ ],
+ "objects": [
+  {
+   "name": "glass_cup",
+   "prompt": "transparent glass cup",
+   "role": "moved",
+   "shape": "hull",
+   "hint": {
+    "t": 0,
+    "v": 2,
+    "uv": [
+     285,
+     300
+    ]
+   }
+  },
+  {
+   "name": "cup_rack",
+   "prompt": "black cup rack",
+   "role": "static",
+   "shape": "container",
+   "hint": {
+    "t": 0,
+    "v": 2,
+    "uv": [
+     405,
+     92
+    ]
+   }
+  }
+ ]
+}

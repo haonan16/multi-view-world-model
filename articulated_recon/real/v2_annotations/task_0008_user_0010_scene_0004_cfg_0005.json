@@ -1,0 +1,22 @@
+{
+ "note": "wooden cube picked from v1 (190,228) and placed on the black dot of the cardboard sheet, v1 (298,217)",
+ "prompts": [
+  "wooden cube"
+ ],
+ "objects": [
+  {
+   "name": "cube_moved",
+   "prompt": "wooden cube",
+   "role": "moved",
+   "shape": "box",
+   "hint": {
+    "t": 0,
+    "v": 1,
+    "uv": [
+     190,
+     228
+    ]
+   }
+  }
+ ]
+}

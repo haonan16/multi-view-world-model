@@ -1,7 +1,7 @@
 """Build a compact multiview obs.npz from one RH20T episode (colour 640x360 + sensor depth + robot state).
 
   python prep_rh20t_episode.py --color_dir <.../RH20T_cfgN/EP> --depth_dir <.../RH20T_cfgN/EP> --cfg 5 \
-      --out real/EP [--T 10]
+      --out /n/lab_storage/ydu_lab/Lab/akiruga/articulated_recon/real/EP [--T 10]
 
 WORLD = robot base frame. Per camera, base->cam (OpenCV) = T(tcp in cam) @ inv(T(tcp in base)) from
 transformed/tcp.npy and transformed/tcp_base.npy (RH20T quaternions are w,x,y,z); the result is constant over
@@ -69,6 +69,7 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--T", type=int, default=10)
     ap.add_argument("--motion_thr_m", type=float, default=0.02)
+    ap.add_argument("--pad_s", type=float, default=0.0, help="extend the manipulation span by this much on both sides")
     ap.add_argument("--max_sync_ms", type=float, default=100.0, help="drop cameras whose nearest frame is further off")
     a = ap.parse_args()
     cd, dd, out = Path(a.color_dir), Path(a.depth_dir), Path(a.out)
@@ -98,10 +99,14 @@ def main():
     w2c, M_marker = {}, {}
     for s in cams:
         X = np.array([pose(x["tcp"]) @ np.linalg.inv(pose(y["tcp"])) for x, y in zip(tc[s], tb[s])
-                      if x["timestamp"] == y["timestamp"]])
+                      if x["timestamp"] == y["timestamp"] and x.get("tcp") is not None and y.get("tcp") is not None])
+        if len(X) == 0:
+            print("no tcp-in-camera data, camera skipped:", s)
+            continue
         assert X.std(0).max() < 1e-6, (s, X.std(0).max())
         w2c[s] = X.mean(0)
         M_marker[s] = np.linalg.inv(np.asarray(Ex[s], dtype=np.float64).reshape(-1, 4, 4)[0]) @ w2c[s]
+    cams = [s for s in cams if s in w2c]
     Ms = np.array(list(M_marker.values()))
     print("base->marker consistency across cams (max abs dev):", float(np.abs(Ms - Ms.mean(0)).max()))
 
@@ -121,6 +126,8 @@ def main():
             rob.setdefault(int(k), {})["g"] = (float(v["gripper_info"][0]), float(v["gripper_command"][0]))
     for s in tb:
         for x in tb[s]:
+            if x.get("tcp") is None:
+                continue
             rob.setdefault(int(x["timestamp"]), {})["tcp"] = np.asarray(x["tcp"][:7], dtype=np.float64)
     rk = np.array(sorted(k for k, v in rob.items() if {"q", "g", "tcp"} <= v.keys()))
 
@@ -132,6 +139,8 @@ def main():
     if moving.any():
         t_lo = max(t_lo, rk[np.argmax(moving)])
         t_hi = min(t_hi, rk[len(moving) - 1 - np.argmax(moving[::-1])])
+    t_lo = max(t_lo - a.pad_s * 1000, max(t[0] for t in ts.values()))
+    t_hi = min(t_hi + a.pad_s * 1000, min(t[-1] for t in ts.values()))
     grid = np.linspace(t_lo, t_hi, a.T)
     fidx = np.zeros((a.T, len(cams)), np.int64)
     sync = np.zeros((a.T, len(cams)))

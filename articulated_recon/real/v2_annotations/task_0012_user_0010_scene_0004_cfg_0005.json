@@ -1,0 +1,38 @@
+{
+ "note": "soccer ball (v2 405,100) pushed into the small white goal (v2 292,175)",
+ "prompts": [
+  "small soccer ball",
+  "small white soccer goal"
+ ],
+ "objects": [
+  {
+   "name": "ball",
+   "prompt": "small soccer ball",
+   "role": "moved",
+   "shape": "sphere",
+   "hint": {
+    "t": 0,
+    "v": 2,
+    "uv": [
+     405,
+     100
+    ]
+   },
+   "mode": "push"
+  },
+  {
+   "name": "goal",
+   "prompt": "small white soccer goal",
+   "role": "static",
+   "shape": "container",
+   "hint": {
+    "t": 0,
+    "v": 2,
+    "uv": [
+     292,
+     178
+    ]
+   }
+  }
+ ]
+}

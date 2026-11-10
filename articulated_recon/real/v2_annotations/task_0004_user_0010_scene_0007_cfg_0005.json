@@ -1,0 +1,7 @@
+{"task": "Pick up the small block on the left and move it to the right",
+ "note": "two ~3 cm wooden cubes; the one nearer the robot in view 2 (centre of the red/white border) is picked and carried to the far side (top of view 2); the other stays",
+ "prompts": ["wooden cube"],
+ "objects": [
+  {"name": "cube_moved", "prompt": "wooden cube", "role": "moved", "shape": "box", "hint": {"t": 0, "v": 2, "uv": [291, 205]}},
+  {"name": "cube_static", "prompt": "wooden cube", "role": "static", "shape": "box", "hint": {"t": 0, "v": 2, "uv": [216, 280]}}
+ ]}
