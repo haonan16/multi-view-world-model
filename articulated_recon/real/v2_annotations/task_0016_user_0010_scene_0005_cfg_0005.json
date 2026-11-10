@@ -15,7 +15,7 @@
     "billiard cue"
    ],
    "role": "moved",
-   "shape": "box",
+   "shape": "mesh",
    "hint": {
     "t": 0,
     "v": 2,
@@ -24,7 +24,8 @@
      160
     ]
    },
-   "thin": true
+   "thin": true,
+   "alt_shape": "box"
   },
   {
    "name": "pool_table",

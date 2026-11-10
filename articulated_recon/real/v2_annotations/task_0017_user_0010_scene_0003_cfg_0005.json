@@ -9,7 +9,7 @@
    "name": "marker",
    "prompt": "marker pen",
    "role": "moved",
-   "shape": "box",
+   "shape": "mesh",
    "hint": {
     "t": 0,
     "v": 2,
@@ -18,7 +18,8 @@
      170
     ]
    },
-   "thin": true
+   "thin": true,
+   "alt_shape": "box"
   },
   {
    "name": "pen_holder",

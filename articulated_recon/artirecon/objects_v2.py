@@ -558,7 +558,10 @@ class ObjectsV2:
             yaw = lambda a: np.array([[np.cos(a), -np.sin(a), 0, 0], [np.sin(a), np.cos(a), 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
             # candidate shapes: a SAM 3D asset competes with the 2.5D hull (its orientation can be wrong);
             # keep the one that explains the rest-frame silhouettes + depth best after refinement
-            variants = [spec] + ([dict(spec, shape="hull")] if spec.get("shape") == "mesh" else [])
+            alt = spec.get("alt_shape", "hull")
+            variants = [spec] + ([dict(spec, shape=alt)] if spec.get("shape") == "mesh" else [])
+            if spec.get("shape") == "mesh" and not spec.get("mesh"):
+                variants = [dict(spec, shape=alt)]
             best = None
             for sv in variants:
                 T0, half, mesh, rest = self.shape(sv, sel, cen, held)

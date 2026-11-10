@@ -79,8 +79,8 @@ Scoring:
 |---|---|---|
 | silhouette F@2px, median | 0.91 | 0.93 |
 | silhouette F@2px, mean | 0.89 | 0.88 |
-| objects with F@2px ≥ 0.8 / ≥ 0.9 | 21 / 17 of 25 | 21 / 16 of 25 |
-| mask IoU, mean (conservative, see above) | 0.63 | 0.57 |
+| objects with F@2px ≥ 0.8 / ≥ 0.9 | 22 / 17 of 25 | 21 / 16 of 25 |
+| mask IoU, mean (conservative, see above) | 0.64 | 0.57 |
 
 | other | value |
 |---|---|
@@ -101,7 +101,7 @@ Best cases (F@2px fitted / held-out):
 - plate put upright into a rack: 0.84 / 0.89.
 
 Failures and limits (F@2px fitted / held-out):
-- **Thin objects:** a few pixels wide at 360p, and their depth is mostly background. Knife 0.74 / 0.67, pool cue 0.77 / 0.62, marker 0.80 / 0.48.
+- **Thin objects:** a few pixels wide at 360p, and their depth is mostly background. Knife 0.75 / 0.67, pool cue 0.78 / 0.65, marker 0.85 / 0.49 (SAM 3D mesh now competes with the box for thin objects; the marker uses it).
 - **Handset:** there are two telephones in the scene, and its mask merges with the cord, and with the base once it is on the cradle. 0.65 / 0.67.
 - Everything else is ≥ 0.84 in both.
 

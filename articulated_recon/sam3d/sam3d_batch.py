@@ -33,7 +33,8 @@ for e in eps:
             continue
         os.makedirs(os.path.dirname(out), exist_ok=True)
         t, v, (u, vv) = o["hint"]["t"], o["hint"]["v"], o["hint"]["uv"]
-        ids = np.nonzero((s3["p"] == prompts.index(o["prompt"])) & (s3["t"] == t) & (s3["v"] == v))[0]
+        pl = o["prompt"] if isinstance(o["prompt"], list) else [o["prompt"]]
+        ids = np.nonzero(np.isin(s3["p"], [prompts.index(x) for x in pl if x in prompts]) & (s3["t"] == t) & (s3["v"] == v))[0]
         best = None
         for i in ids:
             m = np.unpackbits(s3["mask"][i])[:H * W].reshape(H, W).astype(bool)
