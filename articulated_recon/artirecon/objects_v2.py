@@ -528,7 +528,7 @@ class ObjectsV2:
             if not held_t:
                 L = L + float(__import__('os').environ.get('REST_W', 5)) * (h.min(1).values - self.cur_support).abs()  # resting on its support
             if Th is not None:
-                L = L + 2 * ((ctr - Th[:3, 3]).norm(dim=-1) + 0.05 * (R - Th[:3, :3]).norm(dim=(1, 2)))
+                L = L + getattr(self, "hold_w", 2.0) * ((ctr - Th[:3, 3]).norm(dim=-1) + 0.05 * (R - Th[:3, :3]).norm(dim=(1, 2)))
             if opt_scale:
                 L = L + 0.05 * (ls ** 2).sum(1)
             opt.zero_grad(); L.sum().backward(); opt.step()
@@ -616,6 +616,39 @@ class ObjectsV2:
                             poses[t] = T_hold
                             continue
                         poses[t], loss[t] = self.fit_pose(t, inits, Ps, Nm, sel[t], held[t], T_hold)
+            # rigid grasp: while held, the object moves with the hand under ONE grasp transform per hold.
+            # Estimate it from all held frames (rotation chordal mean + translation median, weighted by views)
+            # and refit every held frame strongly tied to it (bad masks in one frame no longer drag the pose)
+            if not static and held.any() and __import__('os').environ.get('RIGID_GRASP'):   # tried: no gain
+                segs, cur = [], []
+                for t in range(T):
+                    if held[t]:
+                        cur.append(t)
+                    elif cur:
+                        segs.append(cur); cur = []
+                if cur:
+                    segs.append(cur)
+                for sg in segs:
+                    if len(sg) < 2:
+                        continue
+                    rel = [np.linalg.inv(self.Th[t]) @ poses[t] for t in sg]
+                    wv = np.array([max(1, len(sel[t])) for t in sg], float)
+                    U, _, Vt = np.linalg.svd(sum(w * r[:3, :3] for w, r in zip(wv, rel)))
+                    Rm = U @ Vt
+                    if np.linalg.det(Rm) < 0:
+                        U[:, -1] *= -1; Rm = U @ Vt
+                    tr_ = np.array([r[:3, 3] for r in rel])
+                    tm = np.array([np.median(np.repeat(tr_[:, k], wv.astype(int))) for k in range(3)])
+                    G = np.eye(4); G[:3, :3] = Rm; G[:3, 3] = tm
+                    self.hold_w = 10.0
+                    for t in sg:
+                        Tr = self.Th[t] @ G
+                        if sel[t]:
+                            poses[t], loss[t] = self.fit_pose(t, [Tr, poses[t]], Ps, Nm, sel[t], True, Tr)
+                        else:
+                            poses[t] = Tr
+                    self.hold_w = 2.0
+                    self.log(f"  {spec['name']}: rigid grasp over frames {sg[0]}-{sg[-1]}")
             self.log(f"  {spec['name']}: role {spec.get('role')}, held frames {np.nonzero(held)[0].tolist()}, "
                      f"views/frame {[len(s) for s in sel]}, travel {np.linalg.norm(poses[-1][:3, 3] - poses[0][:3, 3]) * 100:.1f} cm")
             sup = np.zeros(T)
