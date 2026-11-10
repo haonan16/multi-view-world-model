@@ -23,7 +23,7 @@ for e in eps:
     files = ["overlay.mp4", "overlay_grid.jpg", "masks_grid.jpg"] + sorted(p.name for p in d.glob("crops_*.jpg"))
     ann = json.load(open(ROOT / "real/v2" / e / "ann.json"))
     m = json.load(open(d / "metrics.json"))
-    objs = "".join(f"<li><b>{html.escape(o['name'])}</b> ({o['role']}, {o.get('shape','box')}, prompt “{html.escape(o['prompt'])}”): "
+    objs = "".join(f"<li><b>{html.escape(o['name'])}</b> ({o['role']}, {o.get('shape','box')}, prompt “{html.escape(', '.join(o['prompt']) if isinstance(o['prompt'], list) else o['prompt'])}”): "
                    f"IoU {m.get('obj/' + o['name'] + '/iou_mean', float('nan')):.2f}, silhouette F@2px {m.get('obj/' + o['name'] + '/sil_f2px', float('nan')):.2f}, "
                    f"extents {m.get('obj/' + o['name'] + '/extents_mm', '–')} mm</li>" for o in ann["objects"] if 'obj/' + o['name'] + '/iou_mean' in m)
     crops = "".join(f'<figure><img src="{e}/{p}" loading="lazy"><figcaption>{p[6:-4]}: rows = frames, columns = views; '

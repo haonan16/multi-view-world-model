@@ -1,0 +1,29 @@
+{
+ "offset_px": {
+  "0": [
+   -1.6,
+   0.6
+  ],
+  "1": [
+   0.2,
+   1.5
+  ],
+  "2": [
+   3.0,
+   -3.3
+  ],
+  "3": [
+   -4.6,
+   3.8
+  ],
+  "4": [
+   2.3,
+   -2.3
+  ],
+  "5": [
+   6.9,
+   1.3
+  ]
+ },
+ "source": "rig, leave-one-episode-out medians of object mask-vs-model offsets"
+}

@@ -26,16 +26,34 @@ from .scene_fit import hand_T, tcp_points
 
 
 # ------------------------------------------------------------------ SAM 3 instances
+def shift2d(m, dx, dy):
+    """shift a 2D array by (dx, dy) pixels with zero fill"""
+    dx, dy = int(round(dx)), int(round(dy))
+    out = np.zeros_like(m)
+    H, W = m.shape[:2]
+    ys, yd = (slice(max(0, -dy), H - max(0, dy)), slice(max(0, dy), H - max(0, -dy)))
+    xs, xd = (slice(max(0, -dx), W - max(0, dx)), slice(max(0, dx), W - max(0, -dx)))
+    out[yd, xd] = m[ys, xs]
+    return out
+
+
 class Sam3Masks:
-    def __init__(self, path, H, W):
+    def __init__(self, path, H, W, offsets=None):
+        """offsets {view: (dx, dy)}: colour-vs-geometry pixel offset of that camera; masks are shifted by -offset
+        into the geometry (depth / calibrated camera) frame"""
+        self.offsets = {int(k): v for k, v in (offsets or {}).items()}
         z = np.load(path)
         self.prompts = list(z["prompts"])
         self.p, self.t, self.v, self.score, self.box = z["p"], z["t"], z["v"], z["score"], z["box"]
         self._packed = z["mask"]
         self.H, self.W = H, W
 
-    def mask(self, i):
-        return np.unpackbits(self._packed[i])[: self.H * self.W].reshape(self.H, self.W).astype(bool)
+    def mask(self, i, raw=False):
+        m = np.unpackbits(self._packed[i])[: self.H * self.W].reshape(self.H, self.W).astype(bool)
+        o = self.offsets.get(int(self.v[i]))
+        if o is not None and not raw and (o[0] or o[1]):
+            m = shift2d(m, -o[0], -o[1])
+        return m
 
     def ids(self, prompt, t, v):
         ps = prompt if isinstance(prompt, (list, tuple)) else [prompt]
@@ -198,6 +216,8 @@ class ObjectsV2:
         gate = spec.get("gate", 0.05)
 
         allow_global = [True]
+        last_seen = [th]
+        gpt = np.einsum("tij,j->ti", self.Th, np.array([0, 0, spec.get("finger_reach", 0.15), 1.0]))[:, :3]
 
         def pick(t, pred_list, g=None, min_views=1):
             g = g or gate
@@ -221,7 +241,10 @@ class ObjectsV2:
                     for v in self.use_views:
                         for c in self.instances(pr, t, v):
                             if c["c"] is not None and 0.5 < size(c) / max(ref_size, 1e-3) < 1.6:
-                                cand.append((v, c))
+                                # objects only move when the gripper moves them: must be near its path since last seen
+                                path = gpt[max(0, last_seen[0]):t + 1]
+                                if len(path) and np.min(np.linalg.norm(path - c["c"], axis=1)) < 0.12:
+                                    cand.append((v, c))
                     bestg = None
                     for v, c in cand:
                         agree = {}
@@ -275,13 +298,15 @@ class ObjectsV2:
                     Tm = self.Th[t] @ np.linalg.inv(self.Th[tp])
                     carried = Tm[:3, :3] @ cen[tp] + Tm[:3, 3]
                     preds = [carried, cen[tp]]
-                    held[t] = not (w[t] > max(w_g + 0.025, w_open - 0.015) or w[t] < min(0.005, 0.5 * w_g) - 0.0005)
+                    empty = w_g > 0.008 and w[t] < 0.002            # closed on nothing (not for thin grasps)
+                    held[t] = not (w[t] > max(w_g + 0.025, w_open - 0.015) or empty)
                     allow_global[0] = False
                     chosen, c = pick(t, preds)
                     allow_global[0] = True
                     # evidence of release: the object stays where it was while the hand moves away
-                    if held[t] and c is not None and np.linalg.norm(c - cen[tp]) < 0.02 and \
-                            np.linalg.norm(c - carried) > 0.03 and np.linalg.norm(gpt[t] - c) > 0.05:
+                    if held[t] and c is not None and len(chosen) >= 2 and np.linalg.norm(c - cen[tp]) < 0.02 and \
+                            np.linalg.norm(c - carried) > 0.03 and np.linalg.norm(gpt[t] - c) > 0.05 and \
+                            all(np.linalg.norm(x["c"] - cen[tp]) < 0.03 for x in chosen.values()):
                         held[t] = False
                     if c is None or (held[t] and np.linalg.norm(c - carried) > 0.03):
                         c = carried if held[t] else (c if c is not None else cen[tp])
@@ -292,16 +317,27 @@ class ObjectsV2:
                         preds.append(cen[tp] + dlt)
                     near = last_pts is not None and len(last_pts) and \
                         np.min(np.linalg.norm(last_pts - gpt[t], axis=1)) < spec.get("hold_dist", 0.035 + 0.4 * ref_size)
-                    closing = np.max(w[max(0, t - 3):t + 1]) > w_open - 0.012     # it was open just before
+                    closing = np.max(w[max(0, t - 3):t + 1]) > w[t] + 0.015     # it closed by >= 1.5 cm over the last frames
                     held[t] = (not static) and (not push) and w[t] < w_open - 0.004 and w[t] > 0.0005 \
                         and w[t] <= w[tp] + 0.003 and closing and near
-                    if held[t]:
-                        w_g = w[t]
+                    Tm = self.Th[t] @ np.linalg.inv(self.Th[tp])
+                    carried = Tm[:3, :3] @ cen[tp] + Tm[:3, 3]
+                    reach = near and w[t] < w_open - 0.004 and not static and not push
+                    if reach and not held[t] and np.linalg.norm(carried - cen[tp]) > 0.03:
+                        preds.append(carried)
                     chosen, c = pick(t, preds)
+                    # motion evidence (thin grasps the width cannot show): the gripper is closed at the object and
+                    # its detections moved with the hand instead of staying
+                    if reach and not held[t] and c is not None and len(chosen) >= 2 and \
+                            np.linalg.norm(c - carried) < 0.03 and np.linalg.norm(c - cen[tp]) > 0.03:
+                        held[t] = True
+                    if held[t]:
+                        w_g = max(w[t], 0.001)
                     if c is None:
                         c = preds[0]
             sel[t], cen[t] = chosen, c
             if chosen:
+                last_seen[0] = t
                 last_pts = np.concatenate([x["P"] for x in chosen.values()])[::5]
             elif last_pts is not None and t > th:
                 last_pts = last_pts + (cen[t] - cen[t - 1])
@@ -455,7 +491,7 @@ class ObjectsV2:
             h = P @ n + self.d
             L = L + 50 * torch.relu(-h - 0.002).mean(1) + 200 * torch.relu(-h - 0.001).max(1).values  # no table penetration
             if not held_t:
-                L = L + 5 * (h.min(1).values - self.cur_support).abs()        # resting on its support
+                L = L + float(__import__('os').environ.get('REST_W', 5)) * (h.min(1).values - self.cur_support).abs()  # resting on its support
             if Th is not None:
                 L = L + 2 * ((ctr - Th[:3, 3]).norm(dim=-1) + 0.05 * (R - Th[:3, :3]).norm(dim=(1, 2)))
             if opt_scale:

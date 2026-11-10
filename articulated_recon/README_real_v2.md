@@ -20,6 +20,7 @@ The robot is still fitted from multiview depth alone. The logged joints are used
 | 4. masks | SAM 3 (`facebook/sam3`, transformers) text-prompted instance masks in every view and frame | `seg_sam3.py --many` |
 | 5. assets | SAM 3D Objects mesh from the clicked mask (hint view) for hull objects; decimated to 20k faces | `sam3d/sam3d_batch.py`, `sam3d/decimate.py` |
 | 6. objects | track, shape, pose (below) | `artirecon/objects_v2.py` |
+| 6b. rig colour correction | each camera's colour image is offset from the calibrated geometry by 1–7 px at the table, consistently per camera serial across episodes (a robot-silhouette check sees ~0–2 px, so it is local, e.g. distortion / colour–depth registration). Per camera, the median object mask-vs-model offset over the **other** episodes (leave-one-episode-out) shifts that camera's SAM 3 masks into the geometry frame; renders are shifted back for display. One round converges: second-round residuals are < 1.3 px | `rig_offsets.py`, `Sam3Masks(offsets=)` |
 | 7. metrics | robot vs logged joints; object mask IoU (fitted views and a held-out view), depth agreement, support contact, table penetration, grasp interval vs logged gripper | `real_v2.py`, `summarize_v2.py` |
 
 ### Objects (`objects_v2.py`)
@@ -76,17 +77,18 @@ Scoring:
 
 | moved objects (25) | fitted views | held-out view 0 |
 |---|---|---|
-| silhouette F@2px, median | 0.86 | 0.85 |
-| silhouette F@2px, mean | 0.83 | 0.83 |
-| objects with F@2px ≥ 0.8 | 18 / 25 | 18 / 25 |
-| mask IoU, mean (conservative, see above) | 0.47 | 0.49 |
+| silhouette F@2px, median | 0.91 | 0.90 |
+| silhouette F@2px, mean | 0.87 | 0.86 |
+| objects with F@2px ≥ 0.8 / ≥ 0.9 | 21 / 14 of 25 | 19 / 12 of 25 |
+| mask IoU, mean (conservative, see above) | 0.54 | 0.52 |
 
 | other | value |
 |---|---|
-| static targets: mask IoU (mean) | 0.55 |
-| held state detected | 21 of 25 moved objects (2 of the 25 are pushes, never held) |
-| grasp interval vs logged gripper (IoU over frames) | 0.59 (thin rims and blades now count as grasps; marker 0.17 → 0.83) |
+| static targets: mask IoU (mean) | 0.56 |
+| grasps detected | 23 of 23 grasped objects (the other 2 moved objects are pushes) |
+| grasp interval vs logged gripper (IoU over frames) | 0.84 |
 | moved objects touching their support when not held (≤ 5 mm) | 25 / 25 |
+| SAM 3 mask self-consistency for a resting object (frame-to-frame IoU) | 0.98 median, so the masks are not the bottleneck |
 
 Held-out and fitted scores agree, so the fits are not overfitting the views they use.
 
@@ -99,10 +101,9 @@ Best cases (F@2px fitted / held-out):
 - plate put upright into a rack: 0.84 / 0.89.
 
 Failures and limits:
-- **Thin objects:** a few pixels wide at 360p, and their depth is mostly background. Knife 0.76 / 0.72 (IoU 0.11), marker 0.76 / 0.66, pool cue 0.75 / 0.80. A `thin` flag widens the silhouette-driven scale range: the knife's box went from 268×73 to 264×28 mm, and its loss fell from 0.99 to 0.34.
-- **Lost track:** one plate taken out of a rack (task 0051, scene 2) is lost after it is lifted. The grasp is missed, and it moves more than 12 cm before it is seen flat. F@2px is 0.59.
-- **Handset:** long and dark, and SAM 3 misses it in several views. F@2px 0.62 / 0.78.
-- **Missed grasps:** the roll, the handset and the knife. They are still tracked by their masks.
+- **Thin objects:** a few pixels wide at 360p, their depth is mostly background, and SAM 3 loses them while they are in the gripper. Knife F@2px 0.62, pool cue 0.72. Broader prompts (`knife blade`, `pen`) raise IoU but pick up false positives on the held-out view, so only the cue keeps them.
+- **Handset:** there are two telephones in the scene, and the handset mask merges with its cord and with the base once it is on the cradle. F@2px 0.67.
+- **One plate taken out of a rack** (task 0051, scene 2): its grasp is now detected, but the edge-on start leaves few views. F@2px 0.74.
 
 What helped, measured on the episodes where each change was made:
 
@@ -113,6 +114,8 @@ What helped, measured on the episodes where each change was made:
 | grasp state machine on the fitted gripper (closing event, fingertip reach, release on opening, closing on nothing, or the object staying while the hand leaves) | grasp interval IoU 0.30 → 0.56 |
 | smallest SAM 3 mask under the click, 3D-size gating of candidates | handset 0.06 → 0.61; cube inside a tray 0.17 → 0.44 |
 | open containers (trays, boxes, racks) instead of solid boxes | cube in tray 0.44 → 0.70 |
+| grasp from motion evidence (thin rims and blades show ~0 width), closing measured relative to the last frames, size-scaled reach, release only on opening / 2-view evidence, re-acquisition only along the gripper path | all 23 grasped objects detected; grasp interval vs logged gripper 0.59 → 0.84 (roll 0 → 1.0, knife 0 → 0.9, handset 0 → 0.88, plate 0 → 1.0) |
+| rig colour correction (leave-one-episode-out) | moved-object F@2px median 0.86 → 0.91 (held-out 0.85 → 0.90), IoU mean 0.47 → 0.54 |
 | SAM 3D initial asset, competing with a 2.5D hull (best rest-frame fit wins) | phone base 0.75 → 0.78 (depth agreement 0.26 → 0.45); handset correctly falls back to the hull |
 | support from the object's own lowest points when it rests on something | marker on a pen holder 0.27 → 0.43 |
 

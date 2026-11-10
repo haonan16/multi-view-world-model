@@ -166,7 +166,12 @@ for spec in ann["objects"]:              # SAM 3D initial assets where available
     mp = ROOT / "real/v2" / EP / "sam3d" / (spec["name"] + "_20k.ply")
     if spec.get("shape") in ("hull", "mesh") and mp.exists() and not os.environ.get("NO_SAM3D"):
         spec.update(shape="mesh", mesh=str(mp), mesh_json=str(mp).replace("_20k.ply", ".json"))
-sam = Sam3Masks(ROOT / "real/v2" / EP / "sam3.npz", obs.rgb.shape[2], obs.rgb.shape[3])
+coff_f = ROOT / "real/v2" / EP / "color_offset.json"
+COFF = json.load(open(coff_f))["offset_px"] if coff_f.exists() and not os.environ.get("NO_COFF") else {}
+COFF = {int(k): v for k, v in COFF.items()}
+if COFF:
+    log(f"  colour offsets (px, from the robot): {COFF}")
+sam = Sam3Masks(ROOT / "real/v2" / EP / "sam3.npz", obs.rgb.shape[2], obs.rgb.shape[3], offsets=COFF)
 t1 = time.time()
 ex = (a.holdout,) if a.holdout >= 0 else ()
 if a.stage == "metrics":                  # re-score a saved fit (same renderer for every run)
@@ -187,6 +192,7 @@ m = dict(R["robot_metrics"])
 m["recal"] = R["recal"]
 iou = {ob["name"]: np.full((T, V), np.nan) for ob in objs}
 f2 = {ob["name"]: np.full((T, V), np.nan) for ob in objs}
+off = {ob["name"]: np.full((T, V, 2), np.nan) for ob in objs}
 dag = {ob["name"]: np.full((T, V), np.nan) for ob in objs}
 frames, mframes = [], []
 crops = {}
@@ -214,7 +220,9 @@ for t in range(T):
     row, mrow = [], []
     for v in range(V):
         img, alpha, dep, pid = render_points(pr, obs.K[v], np.linalg.inv(o.c2w[v]), H, W, footprint=[2] + [1] * nobj)
-        ov = overlay(obs.rgb[t, v], img, alpha, 0.7)
+        from artirecon.objects_v2 import shift2d
+        cx_, cy_ = COFF.get(v, (0, 0))
+        ov = overlay(obs.rgb[t, v], shift2d(img, cx_, cy_), shift2d(alpha, cx_, cy_), 0.7)
         mv = obs.rgb[t, v].copy()
         for k, ob in enumerate(objs):
             vis = pid == nrob + k
@@ -234,14 +242,16 @@ for t in range(T):
             if sid is not None:
                 sm = sam.mask(sid)
                 iou[ob["name"]][t, v] = float((vis & sm).sum() / max(1, (vis | sm).sum()))
+                if vis.sum() > 20 and sm.sum() > 20:   # centroid offset mask - model (camera-bias diagnosis)
+                    off[ob["name"]][t, v] = np.argwhere(sm).mean(0)[::-1] - np.argwhere(vis).mean(0)[::-1]
                 if vis.sum() and sm.sum():     # silhouette F-score with 2 px tolerance (size-independent)
                     dv = cv2.distanceTransform((~vis).astype(np.uint8), cv2.DIST_L2, 3)
                     ds = cv2.distanceTransform((~sm).astype(np.uint8), cv2.DIST_L2, 3)
                     pr_, rc_ = (ds[vis] <= 2).mean(), (dv[sm] <= 2).mean()
                     f2[ob["name"]][t, v] = float(2 * pr_ * rc_ / max(pr_ + rc_, 1e-6))
-                cs, _ = cv2.findContours(sm.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+                cs, _ = cv2.findContours(sam.mask(sid, raw=True).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
                 cv2.drawContours(mv, cs, -1, (0, 255, 0), 1)
-            cs, _ = cv2.findContours(vis.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+            cs, _ = cv2.findContours(shift2d(vis, cx_, cy_).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
             cv2.drawContours(mv, cs, -1, (255, 0, 255), 1)
             D = o.depth[t, v]
             mk = vis & (D > 0)
@@ -279,6 +289,7 @@ for ob in objs:
     free = ~ob["held"]
     m[f"obj/{nm}/iou_mean"] = float(np.nanmean(iou[nm]))
     m[f"obj/{nm}/sil_f2px"] = float(np.nanmean(f2[nm]))
+    m[f"obj/{nm}/offset_px_views"] = np.round(np.nanmedian(off[nm], 0), 2).tolist()
     if a.holdout >= 0:
         m[f"obj/{nm}/sil_f2px_holdout"] = float(np.nanmean(f2[nm][:, a.holdout]))
     m[f"obj/{nm}/iou_views"] = np.round(np.nanmean(iou[nm], 0), 3).tolist()
@@ -291,7 +302,7 @@ for ob in objs:
     m[f"obj/{nm}/penetration_mm"] = float(np.clip(-hmin, 0, None).max() * 1000)
     m[f"obj/{nm}/held_frames"] = np.nonzero(ob["held"])[0].tolist()
     gw = np.load(ROOT / "real/v2" / EP / "obs.npz")["gripper_width_mm"]
-    gt_hold = (gw > 5) & (gw < 76)                     # logged gripper closed on something (evaluation only)
+    gt_hold = (gw > 0.5) & (gw < 76)                   # logged gripper closed on something (empty close logs 0; evaluation only)
     if next(x for x in ann["objects"] if x["name"] == nm).get("role") == "moved" and gt_hold.any():
         m[f"obj/{nm}/grasp_iou_vs_logged"] = float((gt_hold & ob["held"]).sum() / max(1, (gt_hold | ob["held"]).sum()))
     m[f"obj/{nm}/extents_mm"] = np.round(2 * np.asarray(ob["half"]) * 1000, 1).tolist()

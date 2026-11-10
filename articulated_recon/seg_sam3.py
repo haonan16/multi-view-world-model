@@ -24,6 +24,8 @@ model = Sam3Model.from_pretrained("facebook/sam3", dtype=DT).to(dev).eval()
 
 
 def run_one(d, prompts):
+  if os.environ.get("SAM3_PROMPTS"):
+    prompts = os.environ["SAM3_PROMPTS"].split("|")
   if not prompts:
     prompts = json.load(open(os.path.join(d, "ann.json")))["prompts"]
   z = np.load(os.path.join(d, "obs.npz"))
@@ -50,14 +52,14 @@ def run_one(d, prompts):
                   rec["mask"].append(np.packbits(m.cpu().numpy().astype(bool)))
       print(f"prompt '{pr}': {sum(1 for p in rec['p'] if p == pi)} instances", flush=True)
   print(f"{len(ims) * len(prompts)} images in {time.time() - t0:.1f}s", flush=True)
-  np.savez_compressed(os.path.join(d, "sam3.npz"), prompts=np.array(prompts), p=np.array(rec["p"], int),
+  np.savez_compressed(os.path.join(d, os.environ.get("SAM3_OUT", "sam3.npz")), prompts=np.array(prompts), p=np.array(rec["p"], int),
                       t=np.array(rec["t"], int), v=np.array(rec["v"], int), score=np.array(rec["score"]),
                       box=np.array(rec["box"]).reshape(-1, 4), mask=np.array(rec["mask"]).reshape(len(rec["p"]), -1),
                       shape=np.array([H, W]))
 
 
 for d, pr in jobs:
-    if os.path.exists(os.path.join(d, "sam3.npz")) and pr is None and len(jobs) > 1:
+    if os.path.exists(os.path.join(d, os.environ.get("SAM3_OUT", "sam3.npz"))) and pr is None and len(jobs) > 1:
         continue
     print(d, flush=True)
     run_one(d, pr)

@@ -1,13 +1,19 @@
 {
  "note": "the pool cue lying on the mini pool table is grasped and used to strike a ball",
  "prompts": [
+  "billiard cue",
   "mini pool table",
-  "pool cue stick"
+  "pool cue stick",
+  "wooden stick"
  ],
  "objects": [
   {
    "name": "cue",
-   "prompt": "pool cue stick",
+   "prompt": [
+    "pool cue stick",
+    "wooden stick",
+    "billiard cue"
+   ],
    "role": "moved",
    "shape": "box",
    "hint": {
