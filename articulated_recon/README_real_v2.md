@@ -76,16 +76,16 @@ Scoring:
 
 | moved objects (25) | fitted views | held-out view 0 |
 |---|---|---|
-| silhouette F@2px, median | 0.85 | 0.85 |
+| silhouette F@2px, median | 0.86 | 0.85 |
 | silhouette F@2px, mean | 0.83 | 0.83 |
-| objects with F@2px ≥ 0.8 | 19 / 25 | 17 / 25 |
-| mask IoU, median (conservative, see above) | 0.49 | 0.46 |
+| objects with F@2px ≥ 0.8 | 18 / 25 | 18 / 25 |
+| mask IoU, mean (conservative, see above) | 0.47 | 0.49 |
 
 | other | value |
 |---|---|
 | static targets: mask IoU (mean) | 0.55 |
 | held state detected | 21 of 25 moved objects (2 of the 25 are pushes, never held) |
-| grasp interval vs logged gripper (IoU over frames) | 0.57 |
+| grasp interval vs logged gripper (IoU over frames) | 0.59 (thin rims and blades now count as grasps; marker 0.17 → 0.83) |
 | moved objects touching their support when not held (≤ 5 mm) | 25 / 25 |
 
 Held-out and fitted scores agree, so the fits are not overfitting the views they use.
@@ -102,7 +102,7 @@ Failures and limits:
 - **Thin objects:** a few pixels wide at 360p, and their depth is mostly background. Knife 0.76 / 0.72 (IoU 0.11), marker 0.76 / 0.66, pool cue 0.75 / 0.80. A `thin` flag widens the silhouette-driven scale range: the knife's box went from 268×73 to 264×28 mm, and its loss fell from 0.99 to 0.34.
 - **Lost track:** one plate taken out of a rack (task 0051, scene 2) is lost after it is lifted. The grasp is missed, and it moves more than 12 cm before it is seen flat. F@2px is 0.59.
 - **Handset:** long and dark, and SAM 3 misses it in several views. F@2px 0.62 / 0.78.
-- **Missed grasps:** the roll, which is held almost fully open. It is still tracked by its masks.
+- **Missed grasps:** the roll, the handset and the knife. They are still tracked by their masks.
 
 What helped, measured on the episodes where each change was made:
 

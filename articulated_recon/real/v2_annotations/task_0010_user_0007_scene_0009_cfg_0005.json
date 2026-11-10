@@ -2,12 +2,18 @@
  "note": "black handset lying left of the black phone (v2 292,185) is placed on the phone's cradle (v2 ~370,130)",
  "prompts": [
   "black desk telephone",
-  "black telephone handset"
+  "black telephone handset",
+  "phone handset",
+  "telephone receiver"
  ],
  "objects": [
   {
    "name": "handset",
-   "prompt": "black telephone handset",
+   "prompt": [
+    "black telephone handset",
+    "telephone receiver",
+    "phone handset"
+   ],
    "role": "moved",
    "shape": "hull",
    "hint": {

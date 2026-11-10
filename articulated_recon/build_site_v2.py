@@ -26,13 +26,13 @@ for e in eps:
     objs = "".join(f"<li><b>{html.escape(o['name'])}</b> ({o['role']}, {o.get('shape','box')}, prompt “{html.escape(o['prompt'])}”): "
                    f"IoU {m.get('obj/' + o['name'] + '/iou_mean', float('nan')):.2f}, silhouette F@2px {m.get('obj/' + o['name'] + '/sil_f2px', float('nan')):.2f}, "
                    f"extents {m.get('obj/' + o['name'] + '/extents_mm', '–')} mm</li>" for o in ann["objects"] if 'obj/' + o['name'] + '/iou_mean' in m)
-    crops = "".join(f'<figure><img src="../{e}/{p}" loading="lazy"><figcaption>{p[6:-4]}: rows = frames, columns = views; '
+    crops = "".join(f'<figure><img src="{e}/{p}" loading="lazy"><figcaption>{p[6:-4]}: rows = frames, columns = views; '
                     f'green SAM 3 mask, magenta model</figcaption></figure>' for p in files if p.startswith("crops_"))
     import numpy as np
     rows.append(f"""<section><h2>{e}</h2><p>{html.escape(ann.get('note', ''))}</p>
 <p>robot {np.mean(m['robot_surface_mm']):.1f} mm (gripper {np.mean(m['gripper_surface_mm']):.1f} mm, joints {np.mean(m['joint_err_deg']):.2f}°)</p><ul>{objs}</ul>
-<video src="../{e}/overlay.mp4" controls muted loop preload="none" poster="../{e}/overlay_grid.jpg"></video>
-<details><summary>SAM 3 vs model contours, all frames</summary><img src="../{e}/masks_grid.jpg" loading="lazy"></details>
+<video src="{e}/{"overlay3.mp4" if (d / "overlay3.mp4").exists() else "overlay.mp4"}" controls muted loop preload="none" poster="{e}/overlay_grid.jpg"></video>
+<details><summary>SAM 3 vs model contours, all frames</summary><img src="{e}/masks_grid.jpg" loading="lazy"></details>
 <div class="crops">{crops}</div></section>""")
 page = f"""<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>RH20T v2 reconstruction</title><style>

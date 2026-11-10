@@ -38,8 +38,9 @@ class Sam3Masks:
         return np.unpackbits(self._packed[i])[: self.H * self.W].reshape(self.H, self.W).astype(bool)
 
     def ids(self, prompt, t, v):
-        pi = self.prompts.index(prompt)
-        return np.nonzero((self.p == pi) & (self.t == t) & (self.v == v))[0]
+        ps = prompt if isinstance(prompt, (list, tuple)) else [prompt]
+        pis = [self.prompts.index(x) for x in ps if x in self.prompts]
+        return np.nonzero(np.isin(self.p, pis) & (self.t == t) & (self.v == v))[0]
 
 
 def lift(obs, t, v, m, erode=2):
@@ -274,7 +275,7 @@ class ObjectsV2:
                     Tm = self.Th[t] @ np.linalg.inv(self.Th[tp])
                     carried = Tm[:3, :3] @ cen[tp] + Tm[:3, 3]
                     preds = [carried, cen[tp]]
-                    held[t] = not (w[t] > max(w_g + 0.025, w_open - 0.015) or w[t] < min(0.005, 0.5 * w_g))
+                    held[t] = not (w[t] > max(w_g + 0.025, w_open - 0.015) or w[t] < min(0.005, 0.5 * w_g) - 0.0005)
                     allow_global[0] = False
                     chosen, c = pick(t, preds)
                     allow_global[0] = True
@@ -290,9 +291,9 @@ class ObjectsV2:
                         dlt = gpt[t] - gpt[tp]; dlt -= (dlt @ self.n) * self.n
                         preds.append(cen[tp] + dlt)
                     near = last_pts is not None and len(last_pts) and \
-                        np.min(np.linalg.norm(last_pts - gpt[t], axis=1)) < spec.get("hold_dist", 0.035)
+                        np.min(np.linalg.norm(last_pts - gpt[t], axis=1)) < spec.get("hold_dist", 0.035 + 0.4 * ref_size)
                     closing = np.max(w[max(0, t - 3):t + 1]) > w_open - 0.012     # it was open just before
-                    held[t] = (not static) and (not push) and w[t] < w_open - 0.004 and w[t] > 0.006 \
+                    held[t] = (not static) and (not push) and w[t] < w_open - 0.004 and w[t] > 0.0005 \
                         and w[t] <= w[tp] + 0.003 and closing and near
                     if held[t]:
                         w_g = w[t]
