@@ -538,6 +538,11 @@ class ObjectsV2:
                 L = L + getattr(self, "hold_w", 2.0) * ((ctr - Th[:3, 3]).norm(dim=-1) + 0.05 * (R - Th[:3, :3]).norm(dim=(1, 2)))
             if opt_scale:
                 L = L + 0.05 * (ls ** 2).sum(1)
+            if getattr(self, "rec", None) is not None and (it % 3 == 0 or it == iters - 1):   # optimisation video
+                self.rec.append(dict(stage=getattr(self, "rec_stage", ""), t=t, it=it, iters=iters,
+                                     views=sorted({v for _, st in frames for v in st}),
+                                     P=P.detach()[:, ::2].cpu().numpy().astype(np.float16), L=L.detach().cpu().numpy(),
+                                     masks={(tf, v): c["m"] for tf, st in frames for v, c in st.items()} if it == 0 else None))
             opt.zero_grad(); L.sum().backward(); opt.step()
         with torch.no_grad():
             b = int(L.argmin())
@@ -598,6 +603,7 @@ class ObjectsV2:
                 init = [T0 @ yaw(a) for a in (0, np.pi / 2)] if sv.get("shape", "box") in ("box", "container") else \
                     [T0 @ yaw(a) for a in (0, np.pi / 2, np.pi, -np.pi / 2)] if sv.get("shape") == "hull" else [T0]
                 extra = [(tt, sel[tt]) for tt in rest[1:] if sel[tt]][:: max(1, len(rest) // 3)][:3]
+                self.rec_stage = f"shape+pose [{sv.get('shape', 'box')}]"
                 Tf, _ = self.fit_pose(t_first, init, Ps, Nm, sel[t_first], held[t_first], iters=250, opt_scale=True,
                                       extra=extra)
                 sc = self.last_scale
@@ -610,6 +616,7 @@ class ObjectsV2:
                 else:
                     mesh = mesh.copy(); mesh.vertices = np.asarray(mesh.vertices) * sc
                     Ps = (Ps * sc).astype(np.float32)
+                self.rec_stage = f"refine [{sv.get('shape', 'box')}]"
                 Tp, lp = self.fit_pose(t_first, [Tf], Ps, Nm, sel[t_first], held[t_first], extra=extra)
                 self.log(f"  {spec['name']}: [{sv.get('shape', 'box')}] silhouette shape refinement scale {np.round(sc, 3)} "
                          f"-> extents {np.round(2 * half * 1000, 1)} mm, loss {lp:.4f}")
@@ -642,6 +649,7 @@ class ObjectsV2:
                         if not sel[t] and T_hold is not None:       # fully occluded in the hand: rigid with it
                             poses[t] = T_hold
                             continue
+                        self.rec_stage = "track (held)" if held[t] else "track"
                         poses[t], loss[t] = self.fit_pose(t, inits, Ps, Nm, sel[t], held[t], T_hold)
             # rigid grasp: while held, the object moves with the hand under ONE grasp transform per hold.
             # Estimate it from all held frames (rotation chordal mean + translation median, weighted by views)

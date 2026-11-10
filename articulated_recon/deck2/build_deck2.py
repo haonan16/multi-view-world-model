@@ -46,9 +46,10 @@ s = new_slide("Input: multiview video + depth + cameras")
 vid(s, "p_input", max_h=4.6)
 text(s, "real RH20T robot episodes: 5–6 fixed RealSense views, sensor depth, factory calibration\n20 frames over the manipulation (~2 s apart)", 0.6, 6.1, 12, 1.2, size=22)
 
-s = new_slide("1. Look and click: what moves, where it goes", "1 min / episode")
-img(s, M / "p_ann.jpg", 2.2, 1.2, h=4.6)
-text(s, "by eye: object, text prompt, role (moved / target), shape class, one click", 0.6, 6.1, 12, 1, size=22)
+s = new_slide("1. A person says what moves: one click + a few words", "1 min / episode")
+img(s, M / "p_ann2.jpg", 0.4, 1.25, w=12.5)
+text(s, 'the whole annotation for this episode:   object "cup"  ·  SAM 3 prompt "green cup"  ·  role: moved  ·  shape: hull  ·  click (360, 212), camera 2\n'
+        'no automatic guessing of which object moves: SAM 3 turns the click into the instance mask in every camera', 0.6, 5.0, 12.2, 1.4, size=18)
 
 s = new_slide("2. SAM 3 finds it in every view and frame", "25 s")
 img(s, M / "p_sam3.jpg", 0.4, 1.3, w=12.5)
@@ -57,6 +58,10 @@ text(s, "text-prompted instance masks; the clicked instance is followed in 3D wi
 s = new_slide("3. Cameras refined on the robot, robot fitted", "4 min")
 img(s, M / "p_robot.jpg", 0.4, 1.3, w=12.5)
 text(s, "URDF fit from multiview depth only: 2.8 mm mean over 25 episodes (v1: 13 mm)", 0.6, 6.2, 12, 1, size=22)
+
+s = new_slide("Optimisation: robot joints from multiview depth")
+vid(s, "p_opt_robot", y=1.2, max_h=4.4)
+text(s, "24 joint hypotheses descend the depth + chamfer loss; the best one (magenta) ends 4 mm from the logged joints, which are never used in the fit", 0.6, 5.6, 12.2, 1.2, size=20)
 
 s = new_slide("4. SAM 3D: initial mesh from one view", "45 s / object")
 img(s, M / "p_sam3d_in.jpg", 1.0, 1.4, h=4.4)
@@ -69,6 +74,10 @@ text(s, "keeps the object while it is in the gripper, where per-frame detection 
 s = new_slide("6. Shape and pose from silhouettes + depth", "1–2 min")
 img(s, M / "p_crops.jpg", 3.4, 1.2, h=4.9)
 text(s, "green: SAM 3 mask   magenta: model", 0.6, 6.3, 12, 1, size=22)
+
+s = new_slide("Optimisation: object shape, then pose in every frame")
+vid(s, "p_opt_object", y=1.15, max_h=5.0)
+text(s, "1) SAM 3D mesh and 2.5D hull each fit scale + pose to the silhouettes (green) and depth; the lower loss wins  2) per frame from the previous pose", 0.6, 6.3, 12.2, 1, size=17)
 
 s = new_slide("Output: robot + objects, every camera", "≈ 7 min total")
 vid(s, eps[0], max_h=5.0)

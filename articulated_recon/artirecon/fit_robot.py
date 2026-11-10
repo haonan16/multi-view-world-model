@@ -183,6 +183,9 @@ class RobotFitter:
                 tot = tot + 0.5 * self.logs.pow(2).sum()               # weak prior: scale ~ 1
             if smooth > 0 and len(frames) > 1:
                 tot = tot + smooth * (q8[1:, :7] - q8[:-1, :7]).pow(2).sum()
+            if getattr(self, "rec", None) is not None and (it % 4 == 0 or it == iters - 1):   # optimisation video
+                self.rec.append(dict(it=it, iters=iters, frames=list(frames), q=self.full_q(q8.detach()).cpu().numpy(),
+                                     base=base.detach().cpu().numpy(), L=L.detach().cpu().numpy()))
             opt.zero_grad()
             tot.backward()
             opt.step()
