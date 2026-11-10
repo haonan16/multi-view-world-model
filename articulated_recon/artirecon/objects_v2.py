@@ -15,6 +15,8 @@ Pose per frame (6-DoF): fused-mask points -> model chamfer, multiview depth z-te
 by any camera is penalised), silhouette (visible model points inside the instance mask), table
 non-penetration, resting contact when not held, and rigid-in-hand consistency while held.
 """
+import os
+
 import cv2
 import numpy as np
 import torch
@@ -184,6 +186,11 @@ class ObjectsV2:
             m = self.sam.mask(i)
             if m.sum() > 0.25 * self.H * self.W:          # table / background false positives
                 continue
+            ex = getattr(self, "excl", {}).get((t, v))
+            if ex is not None and not getattr(self, "fitting_static", False):
+                m2 = m & ~ex                               # pixels explained by an already-fitted static object
+                if m2.sum() >= 0.2 * m.sum():
+                    m = m2
             P = lift(self.obs, t, v, m)
             if len(P):
                 P = P[(P @ self.n + self.d) > 0.004]
@@ -540,10 +547,30 @@ class ObjectsV2:
             self.last_scale = ls.clamp(*self.sc_range).exp()[b].cpu().numpy()
         return Tout, float(L[b].detach())
 
+    def static_exclusion(self, ob):
+        """render a fitted static object into every view/frame -> union exclusion masks (mask exclusivity)"""
+        from .splat import render_points
+        tm = trimesh.Trimesh(ob["mesh"][0], ob["mesh"][1], process=False)
+        sp, fi = trimesh.sample.sample_surface(tm, int(max(8000, tm.area * 1500000)), seed=0)
+        sp, sn = np.asarray(sp), np.asarray(tm.face_normals[fi])
+        if not hasattr(self, "excl"):
+            self.excl = {}
+        for t in range(self.obs.T):
+            P = ob["poses"][t]
+            Pw, Nw = sp @ P[:3, :3].T + P[:3, 3], sn @ P[:3, :3].T
+            for v in range(self.obs.V):
+                _, a, _, _ = render_points([(Pw, Nw, (1, 1, 1))], self.obs.K[v], np.linalg.inv(self.obs.c2w[v]), self.H, self.W,
+                                           footprint=[1], light=False)
+                a = cv2.erode(a.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0     # keep a 1 px margin
+                self.excl[(t, v)] = a | self.excl.get((t, v), np.zeros_like(a))
+
     def run(self):
         out = []
         T = self.obs.T
-        for spec in self.ann["objects"]:
+        specs = sorted(self.ann["objects"], key=lambda o: o.get("role") != "static") if os.environ.get("EXCL") \
+            else self.ann["objects"]        # EXCL=1: static targets first + mask exclusivity (tried: no gain)
+        for spec in specs:
+            self.fitting_static = spec.get("role") == "static"
             try:
                 sel, cen, held = self.track(spec)
                 self.cur_sphere = spec.get("shape") == "sphere"
@@ -661,6 +688,8 @@ class ObjectsV2:
                     sup[t] = 0.0 if sp < 0.006 else sp
                 else:
                     sup[t] = sup[t - 1] if t else 0.0
+            if static and os.environ.get("EXCL"):
+                self.static_exclusion(dict(mesh=(np.asarray(mesh.vertices), np.asarray(mesh.faces)), poses=poses))
             out.append(dict(name=spec["name"], type="static" if static else "free", half=half, poses=poses, support=sup,
                             mesh=(np.asarray(mesh.vertices), np.asarray(mesh.faces)), held=held, loss=loss,
                             sel={t: {v: int(c["i"]) for v, c in sel[t].items()} for t in range(T)},
