@@ -42,10 +42,17 @@ class Sam3Masks:
         """offsets {view: (dx, dy)}: colour-vs-geometry pixel offset of that camera; masks are shifted by -offset
         into the geometry (depth / calibrated camera) frame"""
         self.offsets = {int(k): v for k, v in (offsets or {}).items()}
-        z = np.load(path)
-        self.prompts = list(z["prompts"])
-        self.p, self.t, self.v, self.score, self.box = z["p"], z["t"], z["v"], z["score"], z["box"]
-        self._packed = z["mask"]
+        paths = path if isinstance(path, (list, tuple)) else [path]
+        self.prompts, P, Tt, Vv, S, B, M = [], [], [], [], [], [], []
+        for pth in paths:                       # several mask files (text prompts + video-tracked) merged
+            z = np.load(pth)
+            off = len(self.prompts)
+            self.prompts += list(z["prompts"])
+            P.append(z["p"] + off); Tt.append(z["t"]); Vv.append(z["v"]); S.append(z["score"])
+            B.append(z["box"].reshape(-1, 4)); M.append(z["mask"].reshape(len(z["p"]), -1) if len(z["p"]) else np.zeros((0, (H * W + 7) // 8), np.uint8))
+        self.p, self.t, self.v, self.score = np.concatenate(P), np.concatenate(Tt), np.concatenate(Vv), np.concatenate(S)
+        self.box = np.concatenate(B)
+        self._packed = np.concatenate(M)
         self.H, self.W = H, W
 
     def mask(self, i, raw=False):
@@ -198,6 +205,8 @@ class ObjectsV2:
         """follow the annotated instance through all frames -> per frame: {v: inst}, centre, held flag"""
         obs, T = self.obs, self.obs.T
         pr = spec["prompt"]
+        trk = ("__track__" + spec["name"]) if ("__track__" + spec["name"]) in self.sam.prompts and spec.get("role") != "static" \
+            and spec.get("track", True) else None
         th, vh, (uh, vvh) = spec["hint"]["t"], spec["hint"]["v"], spec["hint"]["uv"]
         cands = self.instances(pr, th, vh)
         hit = sorted([c for c in cands if c["m"][int(vvh), int(uh)] and c["c"] is not None],
@@ -224,6 +233,27 @@ class ObjectsV2:
             chosen, pts = {}, []
             for v in self.use_views:
                 best = None
+                # video-tracked mask of this object: identity is trusted, gate in 2D (the predicted position must
+                # project into its padded box); depth points kept only if consistent (thin objects lift background)
+                if trk is not None:
+                    for c in self.instances([trk], t, v):
+                        x0, y0, x1, y1 = self.sam.box[c["i"]]
+                        uv_ok = False
+                        for p in pred_list:
+                            pc = np.linalg.inv(self.obs.c2w[v]) @ np.r_[p, 1]
+                            if pc[2] > 0.05:
+                                uu, vv_ = (self.obs.K[v] @ pc[:3])[:2] / pc[2]
+                                pad = 30
+                                uv_ok |= (x0 - pad <= uu <= x1 + pad) and (y0 - pad <= vv_ <= y1 + pad)
+                        if uv_ok:
+                            if c["c"] is None or min(np.linalg.norm(c["c"] - p) for p in pred_list) > 2 * g:
+                                c = dict(c, P=np.zeros((0, 3)), c=None)
+                            best = (0.0, c)
+                if best:
+                    chosen[v] = best[1]
+                    if len(best[1]["P"]):
+                        pts.append(best[1]["P"])
+                    continue
                 for c in self.instances(pr, t, v):
                     if c["c"] is None:
                         continue
@@ -235,7 +265,9 @@ class ObjectsV2:
                         best = (dmin, c)
                 if best:
                     chosen[v] = best[1]; pts.append(best[1]["P"])
-            if len(pts) < min_views:
+            if chosen and not pts and len(chosen) >= min_views:
+                return chosen, None
+            if len(pts) < min_views and not (chosen and len(chosen) >= min_views):
                 if g >= 2.5 * gate and min_views >= 2 and allow_global[0]:     # global re-acquisition: size-consistent instance seen by >= 3 views
                     cand = []
                     for v in self.use_views:
@@ -265,6 +297,8 @@ class ObjectsV2:
                         if np.max([np.linalg.norm(a - c2) for a in cs]) < 0.03:
                             return ch2, c2
                 return {}, None
+            if not pts:
+                return chosen, None
             P = np.concatenate(pts)
             return chosen, np.median(P, 0)
 
@@ -336,7 +370,7 @@ class ObjectsV2:
                     if c is None:
                         c = preds[0]
             sel[t], cen[t] = chosen, c
-            if chosen:
+            if chosen and any(len(x["P"]) for x in chosen.values()):
                 last_seen[0] = t
                 last_pts = np.concatenate([x["P"] for x in chosen.values()])[::5]
             elif last_pts is not None and t > th:
@@ -428,8 +462,9 @@ class ObjectsV2:
         w_depth = getattr(self, "w_depth_obj", 0.3) if w_depth is None else w_depth
         frames = [(t, sel_t)] + list(extra)
         self.cur_support = self.support_h(t, sel_t) if sel_t else 0.0
-        if sel_t:
-            hl = float(np.quantile(np.concatenate([c["P"] for c in sel_t.values()]) @ self.n + self.d, 0.05))
+        Pst = np.concatenate([c["P"] for c in sel_t.values()]) if sel_t else np.zeros((0, 3))
+        if len(Pst) > 20:
+            hl = float(np.quantile(Pst @ self.n + self.d, 0.05))
             if hl > 0.015 and not getattr(self, "cur_sphere", False):
                 self.cur_support = max(self.cur_support, hl - 0.003)
         self.cur_support = 0.0 if self.cur_support < 0.006 else self.cur_support
@@ -569,7 +604,7 @@ class ObjectsV2:
                             if held[tp] and held[t]:
                                 T_hold = Tm @ poses[tp]
                         # re-detection: object re-appears somewhere new (centre of the fused masks)
-                        if sel[t]:
+                        if sel[t] and sum(len(x["P"]) for x in sel[t].values()) > 0:
                             c = np.median(np.concatenate([x["P"] for x in sel[t].values()]), 0)
                             Tc = poses[tp].copy(); Tc[:3, 3] += c - (poses[tp][:3, :3] @ Ps.mean(0) + poses[tp][:3, 3])
                             inits.append(Tc)
@@ -582,9 +617,10 @@ class ObjectsV2:
                      f"views/frame {[len(s) for s in sel]}, travel {np.linalg.norm(poses[-1][:3, 3] - poses[0][:3, 3]) * 100:.1f} cm")
             sup = np.zeros(T)
             for t in range(T):
-                if sel[t]:
+                Pst = np.concatenate([c["P"] for c in sel[t].values()]) if sel[t] else np.zeros((0, 3))
+                if len(Pst) > 20:
                     sp = self.support_h(t, sel[t])
-                    hl = float(np.quantile(np.concatenate([c["P"] for c in sel[t].values()]) @ self.n + self.d, 0.05))
+                    hl = float(np.quantile(Pst @ self.n + self.d, 0.05))
                     sp = max(sp, hl - 0.003) if (hl > 0.015 and not self.cur_sphere) else sp
                     sup[t] = 0.0 if sp < 0.006 else sp
                 else:

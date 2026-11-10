@@ -18,7 +18,7 @@ Each scene is run on ground-truth inputs and on the multiview world model's outp
 **Real RH20T, v2 (25 episodes):** see [README_real_v2.md](README_real_v2.md).
 - **Robot:** 2.8 mm mean surface error from multiview depth alone.
 - **Objects:** what moves comes from per-episode annotation. SAM 3 gives masks and SAM 3D gives initial assets, then multiview depth plus silhouettes give shape and pose.
-- **Score:** median silhouette F@2px 0.91 fitted, 0.90 held-out; all 23 grasps detected (0.84 vs logged gripper).
+- **Score:** median silhouette F@2px 0.91 fitted, 0.93 held-out (mask IoU 0.63); all 23 grasps detected (0.84 vs logged gripper).
 
 ## Pipeline
 

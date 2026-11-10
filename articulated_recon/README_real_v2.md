@@ -77,16 +77,16 @@ Scoring:
 
 | moved objects (25) | fitted views | held-out view 0 |
 |---|---|---|
-| silhouette F@2px, median | 0.91 | 0.90 |
-| silhouette F@2px, mean | 0.87 | 0.86 |
-| objects with F@2px ≥ 0.8 / ≥ 0.9 | 21 / 14 of 25 | 19 / 12 of 25 |
-| mask IoU, mean (conservative, see above) | 0.54 | 0.52 |
+| silhouette F@2px, median | 0.91 | 0.93 |
+| silhouette F@2px, mean | 0.89 | 0.88 |
+| objects with F@2px ≥ 0.8 / ≥ 0.9 | 21 / 17 of 25 | 21 / 16 of 25 |
+| mask IoU, mean (conservative, see above) | 0.63 | 0.57 |
 
 | other | value |
 |---|---|
 | static targets: mask IoU (mean) | 0.56 |
 | grasps detected | 23 of 23 grasped objects (the other 2 moved objects are pushes) |
-| grasp interval vs logged gripper (IoU over frames) | 0.84 |
+| grasp interval vs logged gripper (IoU over frames) | 0.86 |
 | moved objects touching their support when not held (≤ 5 mm) | 25 / 25 |
 | SAM 3 mask self-consistency for a resting object (frame-to-frame IoU) | 0.98 median, so the masks are not the bottleneck |
 
@@ -100,10 +100,10 @@ Best cases (F@2px fitted / held-out):
 - lid onto a pan: 0.85 / 0.86;
 - plate put upright into a rack: 0.84 / 0.89.
 
-Failures and limits:
-- **Thin objects:** a few pixels wide at 360p, their depth is mostly background, and SAM 3 loses them while they are in the gripper. Knife F@2px 0.62, pool cue 0.72. Broader prompts (`knife blade`, `pen`) raise IoU but pick up false positives on the held-out view, so only the cue keeps them.
-- **Handset:** there are two telephones in the scene, and the handset mask merges with its cord and with the base once it is on the cradle. F@2px 0.67.
-- **One plate taken out of a rack** (task 0051, scene 2): its grasp is now detected, but the edge-on start leaves few views. F@2px 0.74.
+Failures and limits (F@2px fitted / held-out):
+- **Thin objects:** a few pixels wide at 360p, and their depth is mostly background. Knife 0.74 / 0.67, pool cue 0.77 / 0.62, marker 0.80 / 0.48.
+- **Handset:** there are two telephones in the scene, and its mask merges with the cord, and with the base once it is on the cradle. 0.65 / 0.67.
+- Everything else is ≥ 0.84 in both.
 
 What helped, measured on the episodes where each change was made:
 
@@ -116,6 +116,7 @@ What helped, measured on the episodes where each change was made:
 | open containers (trays, boxes, racks) instead of solid boxes | cube in tray 0.44 → 0.70 |
 | grasp from motion evidence (thin rims and blades show ~0 width), closing measured relative to the last frames, size-scaled reach, release only on opening / 2-view evidence, re-acquisition only along the gripper path | all 23 grasped objects detected; grasp interval vs logged gripper 0.59 → 0.84 (roll 0 → 1.0, knife 0 → 0.9, handset 0 → 0.88, plate 0 → 1.0) |
 | rig colour correction (leave-one-episode-out) | moved-object F@2px median 0.86 → 0.91 (held-out 0.85 → 0.90), IoU mean 0.47 → 0.54 |
+| SAM 3 video tracker (`seg_track.py`), seeded per view with the object stage's own selection, 2D-gated (thin objects lift background depth) | IoU mean 0.54 → 0.63, held-out F@2px median 0.90 → 0.93; knife IoU 0.09 → 0.38, plate from a rack 0.43 → 0.78, roll 0.66 → 0.77 (disabled for the handset, where the track drifts onto the cord / base) |
 | SAM 3D initial asset, competing with a 2.5D hull (best rest-frame fit wins) | phone base 0.75 → 0.78 (depth agreement 0.26 → 0.45); handset correctly falls back to the hull |
 | support from the object's own lowest points when it rests on something | marker on a pen holder 0.27 → 0.43 |
 

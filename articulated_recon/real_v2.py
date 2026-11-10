@@ -171,7 +171,10 @@ COFF = json.load(open(coff_f))["offset_px"] if coff_f.exists() and not os.enviro
 COFF = {int(k): v for k, v in COFF.items()}
 if COFF:
     log(f"  colour offsets (px, from the robot): {COFF}")
-sam = Sam3Masks(ROOT / "real/v2" / EP / "sam3.npz", obs.rgb.shape[2], obs.rgb.shape[3], offsets=COFF)
+mfiles = [ROOT / "real/v2" / EP / "sam3.npz"]
+if (ROOT / "real/v2" / EP / "sam3_track.npz").exists() and not os.environ.get("NO_TRACK"):
+    mfiles.append(ROOT / "real/v2" / EP / "sam3_track.npz")
+sam = Sam3Masks(mfiles, obs.rgb.shape[2], obs.rgb.shape[3], offsets=COFF)
 t1 = time.time()
 ex = (a.holdout,) if a.holdout >= 0 else ()
 if a.stage == "metrics":                  # re-score a saved fit (same renderer for every run)
