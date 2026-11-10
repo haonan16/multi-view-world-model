@@ -7,5 +7,7 @@ __all__ = [
     "WanTextToVideoRayDepthMoTConcat5B",
     "WanTextToVideoRayDepthMoTConcatRebuttal",
     "WanMultiView",
+    "WanMultiViewGeo",
 ]
 from .wan_multiview import WanMultiView
+from .wan_multiview_geo import WanMultiViewGeo

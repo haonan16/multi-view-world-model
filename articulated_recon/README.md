@@ -15,6 +15,11 @@ Test scenes:
 
 Each scene is run on ground-truth inputs and on the multiview world model's outputs (predicted depth and full rollouts).
 
+**Real RH20T, v2 (25 episodes):** see [README_real_v2.md](README_real_v2.md).
+- **Robot:** 2.8 mm mean surface error from multiview depth alone.
+- **Objects:** what moves comes from per-episode annotation. SAM 3 gives masks and SAM 3D gives initial assets, then multiview depth plus silhouettes give shape and pose.
+- **Score:** median silhouette F@2px 0.85, in both fitted and held-out views.
+
 ## Pipeline
 
 Times are for the peg scene, sim GT: 4 views, 11 frames, 448×256, one H100.

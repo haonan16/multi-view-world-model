@@ -7,9 +7,12 @@ from algorithms.wan import (
     WanTextToVideoRayDepthMoTConcat5B,
     WanTextToVideoRayDepthMoTConcatRebuttal,
     WanMultiView,
+    WanMultiViewGeo,
 )
 from datasets.mixture import MixtureDataset
 from datasets.rh20t import RH20TMultiViewDataset
+from datasets.droid_mv import DroidMultiViewDataset
+from datasets.geo_world_mix import GeoWorldMixture
 from .exp_base import BaseLightningExperiment
 
 
@@ -22,6 +25,7 @@ class VideoPredictionExperiment(BaseLightningExperiment):
         wan_t2v_ray_depth_mot_concat_5b=WanTextToVideoRayDepthMoTConcat5B,
         wan_t2v_ray_depth_mot_concat_rebuttal=WanTextToVideoRayDepthMoTConcatRebuttal,
         wan_multiview=WanMultiView,   # multiview ablation: design=tokens | tiled
+        wan_multiview_geo=WanMultiViewGeo,   # RGB + geometry (depth | pointmap) MoT world model
     )
 
     compatible_datasets = dict(
@@ -30,6 +34,8 @@ class VideoPredictionExperiment(BaseLightningExperiment):
         rh20t_multiview=RH20TMultiViewDataset,   # multiview ablation (tokens vs tiled)
         rh20t_multiview_v2=RH20TMultiViewDataset,   # v2: 17 frames @ 1.5 fps, scale-normalised cameras
         rh20t_multiview_v2_human=RH20TMultiViewDataset,   # v2 + human demos mixed into training
+        droid_multiview=DroidMultiViewDataset,   # DROID 2 exterior cameras (OOD fine-tune; held-out labs)
+        geo_world_mix=GeoWorldMixture,   # ManiSkill (RGB + depth) + RH20T full episodes at 1 fps
     )
 
     def _build_strategy(self):
