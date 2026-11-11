@@ -116,6 +116,8 @@ robot = URDFRobot(n_pts_per_m2=20000)
 t0 = time.time()
 prep = prepare(obs)
 rf = RobotFitter(obs, prep, robot, log=log, calib=(dm != "raw"), known_base=Tb)
+if os.environ.get("REC"):
+    rf.rec = []                                   # optimisation recording (deck videos)
 rob = rf.run()
 W_SIL = float(os.environ.get("W_SIL", "1.0"))
 VOFF = {}
@@ -266,7 +268,14 @@ json.dump(ann, open(OUT / "ann.json", "w"), indent=1)
 rob_d = dict(q=rob["q"], base=Tb)
 prep_o = dict(n=prep["n"], d=prep["d"])
 t1 = time.time()
-objs = (WMObjects if os.environ.get('TRI', '1') == '1' else ObjectsV2)(obs, prep_o, robot, rob_d, sam, ann, log=log).run()
+_ob = (WMObjects if os.environ.get('TRI', '1') == '1' else ObjectsV2)(obs, prep_o, robot, rob_d, sam, ann, log=log)
+if os.environ.get("REC"):
+    _ob.rec = []
+objs = _ob.run()
+if os.environ.get("REC"):
+    pickle.dump(dict(robot=[r for r in rf.rec if r["iters"] == 300 and r["frames"] == [0] * len(r["frames"]) and len(r["frames"]) > 1],
+                     objects=_ob.rec, obj="red_cube", c2w=obs.c2w, K=obs.K, gt_q=gt["q"], depth=obs.depth.astype(np.float16),
+                     rgb=obs.rgb, final_q=rob["q"], Tb=Tb), open(OUT / "optrec.pkl", "wb"))
 log(f"  objects done [{time.time() - t1:.0f}s]")
 # metrics: frame-0 pose vs GT (the input state), silhouettes vs SAM 3 on the predicted RGB, task check in 3D
 om = {}
