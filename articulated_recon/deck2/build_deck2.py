@@ -46,10 +46,9 @@ s = new_slide("Input: multiview video + depth + cameras")
 vid(s, "p_input", max_h=4.6)
 text(s, "real RH20T robot episodes: 5–6 fixed RealSense views, sensor depth, factory calibration\n20 frames over the manipulation (~2 s apart)", 0.6, 6.1, 12, 1.2, size=22)
 
-s = new_slide("1. A person says what moves: one click + a few words", "1 min / episode")
-img(s, M / "p_ann2.jpg", 0.4, 1.25, w=12.5)
-text(s, 'the whole annotation for this episode:   object "cup"  ·  SAM 3 prompt "green cup"  ·  role: moved  ·  shape: hull  ·  click (360, 212), camera 2\n'
-        'no automatic guessing of which object moves: SAM 3 turns the click into the instance mask in every camera', 0.6, 5.0, 12.2, 1.4, size=18)
+s = new_slide("1. The agent marks the moving object", "1 min / episode")
+img(s, M / "p_ann2.jpg", 0.4, 1.4, w=12.5)
+text(s, 'The agent looks at the video, clicks the cup and names it "green cup".', 0.6, 5.2, 12.2, 1, size=24)
 
 s = new_slide("2. SAM 3 finds it in every view and frame", "25 s")
 img(s, M / "p_sam3.jpg", 0.4, 1.3, w=12.5)
@@ -60,8 +59,12 @@ img(s, M / "p_robot.jpg", 0.4, 1.3, w=12.5)
 text(s, "URDF fit from multiview depth only: 2.8 mm mean over 25 episodes (v1: 13 mm)", 0.6, 6.2, 12, 1, size=22)
 
 s = new_slide("Optimisation: robot joints from multiview depth")
-vid(s, "p_opt_robot", y=1.2, max_h=4.4)
-text(s, "24 joint hypotheses descend the depth + chamfer loss; the best one (magenta) ends 4 mm from the logged joints, which are never used in the fit", 0.6, 5.6, 12.2, 1.2, size=20)
+video(s, "p_opt3d_robot", 0.3, 1.3, w=7.6)
+text(s, "Unknowns: 7 joint angles + gripper width\n(robot base fixed by the camera calibration)\n\n"
+        "Loss:\n• depth points above the table → distance to the robot surface (robust, capped)\n"
+        "• robot surface vs each camera's depth: must not float in front of it\n• joint-limit penalty\n\n"
+        "Solver: Adam, 300 steps, learning rate 0.03 → cosine decay; 24 starting poses, keep the lowest loss\n\n"
+        "Then: each frame starts from the previous one; finally all frames refined together", 8.1, 1.3, 5.0, 5.6, size=15)
 
 s = new_slide("4. SAM 3D: initial mesh from one view", "45 s / object")
 img(s, M / "p_sam3d_in.jpg", 1.0, 1.4, h=4.4)
@@ -76,8 +79,13 @@ img(s, M / "p_crops.jpg", 3.4, 1.2, h=4.9)
 text(s, "green: SAM 3 mask   magenta: model", 0.6, 6.3, 12, 1, size=22)
 
 s = new_slide("Optimisation: object shape, then pose in every frame")
-vid(s, "p_opt_object", y=1.15, max_h=5.0)
-text(s, "1) SAM 3D mesh and 2.5D hull each fit scale + pose to the silhouettes (green) and depth; the lower loss wins  2) per frame from the previous pose", 0.6, 6.3, 12.2, 1, size=17)
+video(s, "p_opt3d_object", 0.3, 1.3, w=7.6)
+text(s, "Unknowns: rotation + position (6), and on the first frame 3 size scales\n\n"
+        "Loss, summed over all cameras:\n• model points projected into the image must land inside the SAM 3 mask\n"
+        "• the mask must be covered by the model\n• model vs depth points (lower weight)\n"
+        "• no sinking into the table; rests on its support unless held\n\n"
+        "Solver: Adam, 250 steps for size + pose, 150 per frame; starting guesses: 4 rotations; SAM 3D mesh vs outline, lower loss wins\n\n"
+        "Per frame: start from the previous pose (moved with the gripper if held)", 8.1, 1.3, 5.0, 5.6, size=15)
 
 s = new_slide("Output: robot + objects, every camera", "≈ 7 min total")
 vid(s, eps[0], max_h=5.0)
