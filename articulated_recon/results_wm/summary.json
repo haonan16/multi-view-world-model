@@ -1,22 +1,22 @@
 {
  "summary": {
   "n": 25,
-  "robot_sil_iou_mean": 0.5156676779001604,
+  "robot_sil_iou_mean": 0.5323527564588709,
   "robot_sil_iou_views": [
-   0.519,
-   0.459,
-   0.516,
-   0.561
+   0.553,
+   0.464,
+   0.5,
+   0.603
   ],
-  "obj_sil_f2px_median": 0.6737481500266802,
-  "obj_iou_mean": 0.34631097617874823,
-  "cube_side_mm_median": 42.2,
+  "obj_sil_f2px_median": 0.6957729508620247,
+  "obj_iou_mean": 0.3538059811042224,
+  "cube_side_mm_median": 41.55,
   "cube_side_mm_iqr": [
-   40.8,
-   44.4
+   39.4,
+   43.2
   ],
-  "stacked_3d": 19,
-  "strict_view_err_px_median": 7.734758487987181
+  "stacked_3d": 25,
+  "strict_view_err_px_median": 8.192439759126973
  },
  "episodes": [
   {
@@ -159,39 +159,6 @@
     "dz_expected_mm": 42.10966387223505
    },
    "stacked": true
-  },
-  {
-   "name": "StackCube-v1_episode-0972_s0",
-   "robot_sil_iou": 0.5900235576224225,
-   "robot_sil_iou_views": [
-    0.438,
-    0.543,
-    0.79,
-    0.556
-   ],
-   "strict_view_err_px": 5.812930650490682,
-   "objects": {
-    "red_cube": {
-     "sil_f2px": 0.8290901739678926,
-     "iou": 0.45877464659700157,
-     "side_mm": 37.8,
-     "f0_err_mm": 28.48333794374554,
-     "held": []
-    },
-    "green_cube": {
-     "sil_f2px": 0.5366939967309641,
-     "iou": 0.2177380146276181,
-     "side_mm": 43.7,
-     "f0_err_mm": 24.11474468628512,
-     "held": []
-    }
-   },
-   "stack_3d": {
-    "dxy_mm": 28.528378271160683,
-    "dz_mm": 41.617151349782944,
-    "dz_expected_mm": 40.77174395466902
-   },
-   "stacked": false
   },
   {
    "name": "StackCube-v1_episode-0951_s4",
@@ -434,41 +401,6 @@
    "stacked": true
   },
   {
-   "name": "StackCube-v1_episode-0963_s11",
-   "robot_sil_iou": 0.3840929987606969,
-   "robot_sil_iou_views": [
-    0.406,
-    0.382,
-    0.323,
-    0.438
-   ],
-   "strict_view_err_px": 7.734758487987181,
-   "objects": {
-    "red_cube": {
-     "sil_f2px": 0.6186528697409017,
-     "iou": 0.31658452080613003,
-     "side_mm": 50.0,
-     "f0_err_mm": 94.46752190903199,
-     "held": [
-      3
-     ]
-    },
-    "green_cube": {
-     "sil_f2px": 0.6824129304218528,
-     "iou": 0.3748078606556323,
-     "side_mm": 44.6,
-     "f0_err_mm": 74.80366623689237,
-     "held": []
-    }
-   },
-   "stack_3d": {
-    "dxy_mm": 24.203540885783326,
-    "dz_mm": 83.12265574932098,
-    "dz_expected_mm": 47.28481747210395
-   },
-   "stacked": false
-  },
-  {
    "name": "StackCube-v1_episode-0975_s7",
    "robot_sil_iou": 0.5566137610963598,
    "robot_sil_iou_views": [
@@ -500,41 +432,6 @@
     "dz_expected_mm": 37.14417758091133
    },
    "stacked": true
-  },
-  {
-   "name": "StackCube-v1_episode-0965_s7",
-   "robot_sil_iou": 0.4787297444316571,
-   "robot_sil_iou_views": [
-    0.547,
-    0.355,
-    0.468,
-    0.556
-   ],
-   "strict_view_err_px": 7.895905144486497,
-   "objects": {
-    "red_cube": {
-     "sil_f2px": 0.6591116663901905,
-     "iou": 0.3049330022033393,
-     "side_mm": 44.1,
-     "f0_err_mm": 77.67886458994155,
-     "held": [
-      5
-     ]
-    },
-    "green_cube": {
-     "sil_f2px": 0.5964965242483774,
-     "iou": 0.2746824487554184,
-     "side_mm": 41.6,
-     "f0_err_mm": 26.136356883981975,
-     "held": []
-    }
-   },
-   "stack_3d": {
-    "dxy_mm": 31.76426285791141,
-    "dz_mm": 42.870361369482026,
-    "dz_expected_mm": 42.83386195231659
-   },
-   "stacked": false
   },
   {
    "name": "StackCube-v1_episode-0963_s7",
@@ -638,105 +535,6 @@
     "dz_expected_mm": 44.85884957557379
    },
    "stacked": true
-  },
-  {
-   "name": "StackCube-v1_episode-0962_s9",
-   "robot_sil_iou": 0.4624596755196166,
-   "robot_sil_iou_views": [
-    0.523,
-    0.469,
-    0.417,
-    0.469
-   ],
-   "strict_view_err_px": 8.790305148939055,
-   "objects": {
-    "red_cube": {
-     "sil_f2px": 0.5196352053396015,
-     "iou": 0.2350614493552539,
-     "side_mm": 45.8,
-     "f0_err_mm": 124.10088702295378,
-     "held": []
-    },
-    "green_cube": {
-     "sil_f2px": 0.40824577675960416,
-     "iou": 0.22341332615644552,
-     "side_mm": 48.6,
-     "f0_err_mm": 118.83837699131749,
-     "held": []
-    }
-   },
-   "stack_3d": {
-    "dxy_mm": 25.668788099012435,
-    "dz_mm": 47.29556668858273,
-    "dz_expected_mm": 47.20318466914717
-   },
-   "stacked": false
-  },
-  {
-   "name": "StackCube-v1_episode-0955_s7",
-   "robot_sil_iou": 0.4700380146449078,
-   "robot_sil_iou_views": [
-    0.426,
-    0.388,
-    0.519,
-    0.54
-   ],
-   "strict_view_err_px": 8.962008296998356,
-   "objects": {
-    "red_cube": {
-     "sil_f2px": 0.7211301834706879,
-     "iou": 0.37760301467309576,
-     "side_mm": 41.6,
-     "f0_err_mm": 55.44323991102224,
-     "held": []
-    },
-    "green_cube": {
-     "sil_f2px": 0.6343631720049505,
-     "iou": 0.27465029104114913,
-     "side_mm": 45.3,
-     "f0_err_mm": 108.79874540198014,
-     "held": []
-    }
-   },
-   "stack_3d": {
-    "dxy_mm": 42.883974538589555,
-    "dz_mm": 55.463142693042755,
-    "dz_expected_mm": 43.45160918712027
-   },
-   "stacked": false
-  },
-  {
-   "name": "StackCube-v1_episode-0963_s9",
-   "robot_sil_iou": 0.38547089113650224,
-   "robot_sil_iou_views": [
-    0.246,
-    0.339,
-    0.371,
-    0.563
-   ],
-   "strict_view_err_px": 8.986232084483985,
-   "objects": {
-    "red_cube": {
-     "sil_f2px": 0.6410808217293075,
-     "iou": 0.3177377129750135,
-     "side_mm": 48.1,
-     "f0_err_mm": 136.12030752315943,
-     "held": []
-    },
-    "green_cube": {
-     "sil_f2px": 0.6257442751579179,
-     "iou": 0.3141279219850012,
-     "side_mm": 43.5,
-     "f0_err_mm": 47.29298397154268,
-     "held": []
-    }
-   },
-   "stack_3d": {
-    "dxy_mm": 30.402470208328527,
-    "dz_mm": 45.829822559007766,
-    "dz_expected_mm": 45.80064826296423
-   },
-   "stacked": false
   },
   {
    "name": "StackCube-v1_episode-0965_s10",
@@ -872,6 +670,214 @@
     "dxy_mm": 13.055956977907641,
     "dz_mm": 39.18414058190376,
     "dz_expected_mm": 39.23721807713893
+   },
+   "stacked": true
+  },
+  {
+   "name": "StackCube-v1_episode-0950_s3",
+   "robot_sil_iou": 0.5881919084174143,
+   "robot_sil_iou_views": [
+    0.696,
+    0.49,
+    0.436,
+    0.682
+   ],
+   "strict_view_err_px": 11.05202462337824,
+   "objects": {
+    "red_cube": {
+     "sil_f2px": 0.6963948663792328,
+     "iou": 0.3449999207593413,
+     "side_mm": 45.0,
+     "f0_err_mm": 24.184751726011207,
+     "held": [
+      4
+     ]
+    },
+    "green_cube": {
+     "sil_f2px": 0.6328322454859974,
+     "iou": 0.30972144005974456,
+     "side_mm": 47.6,
+     "f0_err_mm": 37.995296433145086,
+     "held": []
+    }
+   },
+   "stack_3d": {
+    "dxy_mm": 14.03166080328269,
+    "dz_mm": 48.772018402814865,
+    "dz_expected_mm": 46.31419023769903
+   },
+   "stacked": true
+  },
+  {
+   "name": "StackCube-v1_episode-0955_s3",
+   "robot_sil_iou": 0.5549049167238458,
+   "robot_sil_iou_views": [
+    0.474,
+    0.447,
+    0.468,
+    0.785
+   ],
+   "strict_view_err_px": 11.550240480128888,
+   "objects": {
+    "red_cube": {
+     "sil_f2px": 0.74616488465325,
+     "iou": 0.39103244531400533,
+     "side_mm": 39.8,
+     "f0_err_mm": 7.024542908307298,
+     "held": [
+      4
+     ]
+    },
+    "green_cube": {
+     "sil_f2px": 0.6572681881633065,
+     "iou": 0.35087050944250864,
+     "side_mm": 38.8,
+     "f0_err_mm": 37.00699244615434,
+     "held": []
+    }
+   },
+   "stack_3d": {
+    "dxy_mm": 17.19805550403475,
+    "dz_mm": 42.51846671104431,
+    "dz_expected_mm": 39.300252446223624
+   },
+   "stacked": true
+  },
+  {
+   "name": "StackCube-v1_episode-0950_s1",
+   "robot_sil_iou": 0.4983845718521144,
+   "robot_sil_iou_views": [
+    0.595,
+    0.441,
+    0.417,
+    0.579
+   ],
+   "strict_view_err_px": 12.651864034355153,
+   "objects": {
+    "red_cube": {
+     "sil_f2px": 0.8233353798948966,
+     "iou": 0.4575327070716196,
+     "side_mm": 40.5,
+     "f0_err_mm": 24.12649566019394,
+     "held": []
+    },
+    "green_cube": {
+     "sil_f2px": 0.5812189588197344,
+     "iou": 0.38913370347124715,
+     "side_mm": 39.2,
+     "f0_err_mm": 6.432032466903645,
+     "held": []
+    }
+   },
+   "stack_3d": {
+    "dxy_mm": 5.339364534711157,
+    "dz_mm": 56.82941898703575,
+    "dz_expected_mm": 39.866790207158125
+   },
+   "stacked": true
+  },
+  {
+   "name": "StackCube-v1_episode-0953_s1",
+   "robot_sil_iou": 0.48702305493820175,
+   "robot_sil_iou_views": [
+    0.597,
+    0.326,
+    0.412,
+    0.587
+   ],
+   "strict_view_err_px": 12.684696310729166,
+   "objects": {
+    "red_cube": {
+     "sil_f2px": 0.5883220797426302,
+     "iou": 0.2931475686487784,
+     "side_mm": 41.7,
+     "f0_err_mm": 26.190771988150118,
+     "held": []
+    },
+    "green_cube": {
+     "sil_f2px": 0.6951510353448168,
+     "iou": 0.4453207813693146,
+     "side_mm": 37.9,
+     "f0_err_mm": 49.76026400947531,
+     "held": []
+    }
+   },
+   "stack_3d": {
+    "dxy_mm": 4.343850509177993,
+    "dz_mm": 50.60148984193802,
+    "dz_expected_mm": 39.7692923510159
+   },
+   "stacked": true
+  },
+  {
+   "name": "StackCube-v1_episode-0951_s3",
+   "robot_sil_iou": 0.581413310615316,
+   "robot_sil_iou_views": [
+    0.648,
+    0.515,
+    0.38,
+    0.791
+   ],
+   "strict_view_err_px": 12.762889117085674,
+   "objects": {
+    "red_cube": {
+     "sil_f2px": 0.6476257400342407,
+     "iou": 0.279819696195213,
+     "side_mm": 35.8,
+     "f0_err_mm": 39.43106477394111,
+     "held": [
+      5,
+      6
+     ]
+    },
+    "green_cube": {
+     "sil_f2px": 0.37500683168983245,
+     "iou": 0.14442357666589375,
+     "side_mm": 40.5,
+     "f0_err_mm": 54.60183473476437,
+     "held": []
+    }
+   },
+   "stack_3d": {
+    "dxy_mm": 4.011271925292257,
+    "dz_mm": 48.39947074651718,
+    "dz_expected_mm": 38.10899635683457
+   },
+   "stacked": true
+  },
+  {
+   "name": "StackCube-v1_episode-0953_s3",
+   "robot_sil_iou": 0.4780240835366727,
+   "robot_sil_iou_views": [
+    0.413,
+    0.36,
+    0.386,
+    0.752
+   ],
+   "strict_view_err_px": 12.902937518013747,
+   "objects": {
+    "red_cube": {
+     "sil_f2px": 0.5167042532249837,
+     "iou": 0.2250552995550252,
+     "side_mm": 46.1,
+     "f0_err_mm": 28.981102929156094,
+     "held": [
+      4,
+      5
+     ]
+    },
+    "green_cube": {
+     "sil_f2px": 0.7374339153016933,
+     "iou": 0.43380680755211803,
+     "side_mm": 39.9,
+     "f0_err_mm": 27.941168945313606,
+     "held": []
+    }
+   },
+   "stack_3d": {
+    "dxy_mm": 3.156651935731292,
+    "dz_mm": 48.62871952354908,
+    "dz_expected_mm": 43.01946964372166
    },
    "stacked": true
   }
