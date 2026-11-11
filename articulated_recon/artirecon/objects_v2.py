@@ -66,7 +66,10 @@ class Sam3Masks:
 
     def ids(self, prompt, t, v):
         ps = prompt if isinstance(prompt, (list, tuple)) else [prompt]
-        pis = [self.prompts.index(x) for x in ps if x in self.prompts]
+        if getattr(self, "first_only", False):     # the first file that has a prompt owns it (colour masks before SAM 3)
+            pis = [self.prompts.index(x) for x in ps if x in self.prompts]
+        else:
+            pis = [i for i, x in enumerate(self.prompts) if x in ps]          # every file with that prompt name
         return np.nonzero(np.isin(self.p, pis) & (self.t == t) & (self.v == v))[0]
 
 
@@ -420,6 +423,14 @@ class ObjectsV2:
         if kind == "box":
             T0, half = box_shape(P, self.n, self.d, base)
             m = trimesh.creation.box(extents=2 * half)
+        elif kind == "cube":                   # equal sides (size refined by the silhouettes, uniform scale)
+            T0, half = box_shape(P, self.n, self.d, base)
+            hs = getattr(self, "cube_side", None)
+            hs = hs / 2 if hs else float(np.median(half)); half = np.array([hs, hs, hs])
+            if getattr(self, "cube_side", None):
+                T0[:3, 3] = cen[rest[0]] - (cen[rest[0]] @ self.n + self.d) * self.n
+            T0[:3, 3] += self.n * (base + hs - (T0[:3, 3] @ self.n + self.d))
+            m = trimesh.creation.box(extents=2 * half)
         elif kind == "container":            # open-top box (tray / bin): floor + 4 walls, 4 mm thick
             T0, half = box_shape(P, self.n, self.d, base)
             m = container_mesh(half)
@@ -581,7 +592,9 @@ class ObjectsV2:
                 self.cur_sphere = spec.get("shape") == "sphere"
                 thin = bool(spec.get("thin"))
                 self.sc_range = (np.log(0.1), np.log(2.5)) if thin else (np.log(0.55), np.log(1.5))
-                self.w_depth_obj = 0.05 if thin else 0.3
+                if spec.get("shape") == "cube" and getattr(self, "cube_side", None):
+                    self.sc_range = (np.log(0.85), np.log(1.2))
+                self.w_depth_obj = 0.05 if thin else float(os.environ.get("OBJ_WDEPTH", 0.3))
             except RuntimeError as ex:
                 self.log(f"  SKIPPED {spec['name']}: {ex}")
                 continue
@@ -600,14 +613,15 @@ class ObjectsV2:
                 Ps, Nm = mesh_samples(mesh, 1500)
                 Ps = Ps.astype(np.float32); Nm = Nm.astype(np.float32)
                 t_first = rest[0]
-                init = [T0 @ yaw(a) for a in (0, np.pi / 2)] if sv.get("shape", "box") in ("box", "container") else \
+                init = [T0 @ yaw(a) for a in (0, np.pi / 4)] if sv.get("shape", "box") == "cube" else \
+                    [T0 @ yaw(a) for a in (0, np.pi / 2)] if sv.get("shape", "box") in ("box", "container") else \
                     [T0 @ yaw(a) for a in (0, np.pi / 2, np.pi, -np.pi / 2)] if sv.get("shape") == "hull" else [T0]
                 extra = [(tt, sel[tt]) for tt in rest[1:] if sel[tt]][:: max(1, len(rest) // 3)][:3]
                 self.rec_stage = f"shape+pose [{sv.get('shape', 'box')}]"
                 Tf, _ = self.fit_pose(t_first, init, Ps, Nm, sel[t_first], held[t_first], iters=250, opt_scale=True,
                                       extra=extra)
                 sc = self.last_scale
-                if sv.get("shape", "box") == "sphere":
+                if sv.get("shape", "box") in ("sphere", "cube"):
                     sc = np.full(3, float(np.mean(sc)))
                 half = np.asarray(half) * sc
                 if sv.get("shape") == "container":
@@ -648,6 +662,9 @@ class ObjectsV2:
                         inits += [p @ yaw(a) for p in inits[:1] for a in (-0.3, 0.3)]
                         if not sel[t] and T_hold is not None:       # fully occluded in the hand: rigid with it
                             poses[t] = T_hold
+                            continue
+                        if not sel[t] and os.environ.get("HOLD_LAST"):   # no observation: keep (or carry) the last pose
+                            poses[t] = inits[1] if (held[tp] or held[t]) and len(inits) > 1 else poses[tp]
                             continue
                         self.rec_stage = "track (held)" if held[t] else "track"
                         poses[t], loss[t] = self.fit_pose(t, inits, Ps, Nm, sel[t], held[t], T_hold)

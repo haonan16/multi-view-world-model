@@ -11,15 +11,14 @@ Sources
   roll    : world-model rollout from view-0 frame-0: predicted RGB + predicted depth for 4 views
 """
 import json
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
 
-PKG = Path(os.environ.get("AR_PKG", "/n/netscratch/ydu_lab/Lab/suraj/shared-maniskill/maniskill-reconstruction-scenes-20261101"))
-GEO = Path(os.environ.get("AR_GEO", "/n/lab_storage/ydu_lab/Lab/akiruga/geo_runs"))
-MSR = Path(os.environ.get("AR_MSR", "/n/lab_storage/ydu_lab/Lab/akiruga/maniskill_render"))
+PKG = Path("/n/netscratch/ydu_lab/Lab/suraj/shared-maniskill/maniskill-reconstruction-scenes-20261101")
+GEO = Path("/n/lab_storage/ydu_lab/Lab/akiruga/geo_runs")
+MSR = Path("/n/lab_storage/ydu_lab/Lab/akiruga/maniskill_render")
 FAR_REL = float(np.exp(1 / 0.9))          # datasets/_scene_norm.py: workspace range in scene units
 MODEL_RUNS = {"A": GEO / "eval_s7000/A/A", "B": GEO / "eval_s9000/B/B"}
 
@@ -128,7 +127,7 @@ def load_dense_drawer(kind, run="B"):
                K, c2w, steps, None, {"scene": "drawer", "kind": kind, "run": run})
 
 
-REAL = Path(os.environ.get("AR_REAL", Path(__file__).resolve().parents[1] / "real"))
+REAL = Path("/n/lab_storage/ydu_lab/Lab/akiruga/articulated_recon/real")
 
 
 def load_real(episode=None):
@@ -156,3 +155,52 @@ def backproject(depth, K, c2w, stride=1):
     y = (v - K[1, 2]) / K[1, 1] * z
     pc = np.stack([x, y, z, np.ones_like(z)], 1)
     return (pc @ c2w.T)[:, :3], np.stack([v, u], 1)
+
+
+H5 = {}
+
+
+def gt_states(episode, steps):
+    """ManiSkill demo states at the given control steps: robot qpos (9), base pose, actor poses (p, wxyz)."""
+    import h5py
+    task, ep = episode.split("/")
+    eid = int(ep.split("-")[1])
+    if task not in H5:
+        H5[task] = h5py.File(MSR / "demos" / task / "trajectory.h5", "r")
+    g = H5[task][f"traj_{eid}"]["env_states"]
+    art = g["articulations"]
+    rk = [k for k in art if k.startswith("panda")][0]
+    A = art[rk][:]
+    n = len(A)
+    st = np.clip(np.asarray(steps), 0, n - 1)
+    out = dict(q=A[st, 13:22], base=A[st, :7], actors={k: g["actors"][k][:][st, :7] for k in g["actors"]
+                                                       if not k.startswith("table")}, steps=st)
+    return out
+
+
+def load_roll(d, use="roll"):
+    """world-model rollout exported by scripts/geo/rollout_batch.py: predicted RGB + predicted depth, 4 views,
+    1 fps.  use='roll' (prediction) or 'gt' (the real episode's frames + sim depth, same cameras)."""
+    d = Path(d)
+    z = np.load(d / "dense.npz")
+    m = json.loads((d / "meta.json").read_text())
+    nr = int(z["n_real"])
+    cams = np.load(MSR / m["episode"] / "cameras.npz")
+    c2w = cams["c2w"][:4].astype(np.float64)
+    c2m = np.array(m["c2w"], dtype=np.float64)
+    c2w_chk = cams["c2w"][0].astype(np.float64)[None] @ c2m
+    assert np.abs(c2w_chk - c2w).max() < 2e-3
+    K = np.array(m["K"], dtype=np.float64)
+    if use == "roll":
+        rgb = z["rgb_pred"]
+        dep = z["z_roll"][:, :nr].astype(np.float32)
+        dep = np.where(dep <= FAR_REL * float(m["scene_scale_m"]), dep, 0).astype(np.float32)
+    else:
+        rgb = z["rgb"]
+        dep = (z["z_gt"][:, :nr].astype(np.float32) * z["valid"])
+    rgb = rgb.transpose(1, 0, 2, 3, 4)                   # T,V,H,W,3
+    dep = dep.transpose(1, 0, 2, 3)
+    steps = np.round(np.arange(nr) * 20).astype(int)
+    meta = {"scene": "standard", "kind": use, "episode": m["episode"], "seed": m.get("seed", 0),
+            "gt": gt_states(m["episode"], steps), "task": m["episode"].split("/")[0]}
+    return Obs(f"{m['episode']}/{use}", np.ascontiguousarray(rgb), np.ascontiguousarray(dep), K, c2w, steps, None, meta)
