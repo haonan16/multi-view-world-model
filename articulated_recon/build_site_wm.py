@@ -11,8 +11,8 @@ for r in J["episodes"]:
 css = "body{font-family:system-ui,sans-serif;max-width:1500px;margin:20px auto;padding:0 16px;color:#222}img{width:100%;border:1px solid #ccc}td,th{padding:3px 8px;border-bottom:1px solid #eee;text-align:right}th{text-align:center}h3{margin-top:28px}"
 h = [f"<!doctype html><meta charset=utf-8><title>World-model 3D fits</title><style>{css}</style>",
      "<h1>3D reconstruction of world-model predictions (ManiSkill StackCube)</h1>",
-     "<p><b>Selection.</b> 290+ rollouts of the multiview world model (view 0, frame 0 + cameras + text &rarr; RGB + depth of 4 views) on the 50 held-out StackCube episodes, several seeds. "
-     "Kept: the red cube ends on the green cube (3D check on triangulated colour blobs, then every candidate checked by eye in all 4 views), ranked by the prediction's own cross-view consistency (worst-view reprojection error of the triangulated cubes); the 25 most consistent of 35 accepted.</p>",
+     "<p><b>Selection.</b> 407 rollouts of the multiview world model (view 0, frame 0 + cameras + text &rarr; RGB + depth of 4 views) on the 50 held-out StackCube episodes, several seeds. "
+     "Kept: the red cube ends on the green cube (3D check on triangulated colour blobs, then every candidate checked by eye in all 4 views), ranked by the prediction's own cross-view consistency (worst-view reprojection error of the triangulated cubes); the 25 most consistent of the accepted ones (18 distinct episodes; median cross-view error 7.7 px).</p>",
      "<p><b>3D fit.</b> Robot: URDF, known base, 24 joint hypotheses on <b>Depth Anything 3</b> depth of the predicted RGB (known cameras; per-view scale from the table) &rarr; refined on SAM 3 'robot arm' silhouettes in every view. "
      "(Test with GT on 18 episodes, real RGB + predicted depth: model depth 21 mm robot error, DA3 3.9 mm.) Cubes: colour masks, multiview triangulation of the blob centroids (RANSAC over views, no depth), "
      "size from silhouette area (calibrated on real renders), silhouette-driven pose, table / contact priors.</p>",
