@@ -245,7 +245,7 @@ TASK_OBJ = {   # name, SAM 3 prompt, role, shape, h5 actor
 }
 task = obs.meta.get("task") or obs.meta["episode"].split("/")[0]
 d_src = Path(ref)
-sam = Sam3Masks(([d_src / "color.npz"] if (d_src / "color.npz").exists() else []) + [d_src / "sam3.npz"] + ([d_src / "sam3_track.npz"] if (d_src / "sam3_track.npz").exists() else []), H, W, offsets=VOFF)
+sam = Sam3Masks(([d_src / "color.npz"] if (d_src / "color.npz").exists() else []) + ([d_src / "sam3.npz"] if (d_src / "sam3.npz").exists() else []) + ([d_src / "sam3_track.npz"] if (d_src / "sam3_track.npz").exists() else []), H, W, offsets=VOFF)
 sam.first_only = True          # colour objects: colour masks only (SAM 3 masks of the same object add offset duplicates)
 # annotation: the object is "clicked" where it is in the given (input) frame 0 -> projection of its frame-0 position
 ann = {"objects": []}
