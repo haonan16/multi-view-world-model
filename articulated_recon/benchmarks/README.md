@@ -9,12 +9,82 @@ RGB-only reconstruction or a successful independent simulator rollout.
 
 - [Protocol and staged comparison matrix](README_protocol.md)
 - [External baseline installation and launch adapters](README_external_baselines.md)
+- [Source-only object initialization](README_source_geometry.md)
+- [Fixed-registration TCP planning](README_registered_plan.md)
 - `rgb_frontend.py`: isolate one recorded RGB camera, then predict metric depth
   and camera intrinsics with an existing local UniDepthV2 checkpoint.
 - `keyframe_compression.py`: compress saved fitted trajectories and measure the
   interpolation error. This is separate from generating only five keyframes.
 - `run_unidepth.sbatch`: bounded GPU job using existing dependencies/checkpoints;
   choose account and partition on submission. No automatic download.
+- `sam3_rgb_masks.py` and `sam3d_rgb_asset.py`: fresh segmentation candidates and
+  image-conditioned assets using existing author checkpoints. Candidate row IDs
+  are not persistent tracks; generated meshes are not validated geometry.
+- `world_model_views.py`: source-video-conditioned helper views with estimated
+  intrinsics and explicitly designed virtual cameras. Generated-camera accuracy
+  is not assumed from the conditioning requests.
+- `fixed_deployment.py`: one declared virtual robot placement shared across
+  variants. This is not a measured camera-to-robot calibration. The independent
+  evaluator applies the identical transform to its reference without snapping.
+- `independent_scene.py`: attaches evaluator-only geometry/cameras after the
+  command submission has been sealed. The present reference is an RGB-D
+  reconstruction proxy, not exact ground-truth CAD.
+
+## Fresh RGB-only runs, 2026-11-19
+
+Native public source RGB was isolated before inference: 80 RH20T block frames
+at 640×360 and 10 Hz, and 120 HO-Cap bottle frames at 640×480 and 30 Hz.
+The isolated arrays contain only RGB and timestamps. No measured depth or
+published camera matrices enter the following predictions.
+
+UniDepth predicted metric depth and intrinsics on both sequences. Its measured
+internal totals were 54.4 s (block) and 78.5 s (bottle), including model loading
+but excluding Python import/startup. SAM3 then produced candidates on every
+frame: 217.4 s and 325.4 s of inference, respectively. The bottle had one object
+and table candidate on every frame. The block had multiple object candidates
+on every frame and no table candidate on 51/80 frames, requiring explicit
+association and pooled table evidence.
+
+Fresh image-only SAM3D assets were generated for both objects. Model inference
+was 43.5 s for the block and 17.1 s for the bottle; cold initialization took
+about 521 s, and the complete two-asset job took 11 min 5 s. These timings must
+not be conflated with warm optimization time. Initial wrapper projection IoU
+was 0.670 and 0.316, respectively; this is a predicted-mask sanity check, not
+ground-truth 3D accuracy. SAM3D scale/pose still require model-derived fitting.
+
+The separate cuboid/translation baseline exposed these failures:
+
+| Depth evidence | Supported poses | Estimated dimensions | Final bottom below estimated table |
+| --- | ---: | --- | ---: |
+| All valid points | 80/80 | 44.1 × 42.8 × 74.9 mm | 37.9 mm |
+| Global top-half confidence rank | 63/80 | 44.5 × 44.6 × 76.1 mm | 39.3 mm |
+
+The confidence filter drops frames 40–56, during manipulation/occlusion.
+These table discrepancies are internal inconsistencies, not measured errors
+against GT. Neither result is execution-ready. A separately declared contact
+policy left geometry exactly unchanged but produced split grasp intervals:
+33–38, 40–58 and 60–63 for all points; 32–39 for rank filtering. Missing grasp
+evidence is not filled merely to permit a plan.
+
+The RH20T block recording appears once in the world model's **training**
+manifest and not in its test manifest (split hash bucket 9051, test threshold
+200/10000). It remains a development/matched-ablation case, not held-out
+generalization evidence. HO-Cap is outside that RH20T fine-tuning dataset;
+pretraining exposure is not established.
+
+## Legacy independent-scene control, 2026-11-19
+
+After removing render-only initialization failures, two previously frozen
+calibrated plans each executed once against the same recorded RGB-D reference
+proxy. Commands, controller and physics were unchanged. The earlier plan had
+28.9 mm XY endpoint error and failed the predeclared 25 mm destination gate;
+the existing stable-support variant had 20.0 mm XY error and passed all seven
+predeclared grasp/lift/release/stability/destination/support gates. Orientation
+errors were 35.6° and 3.9°. The videos render logged robot/object states offline,
+without another physics execution.
+
+This is one clip and two legacy calibrated variants. It is **not** a new
+RGB-only success, exact real-world ground truth, or evidence of generalization.
 
 ## Source RGB preparation
 
