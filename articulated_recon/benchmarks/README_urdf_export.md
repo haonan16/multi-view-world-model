@@ -45,3 +45,26 @@ The exporter does not establish target-robot registration or executable actions.
 
 No GPU rerun is needed to test this hook: its tests use synthetic arrays. The
 native fitting code and original reconstruction results are not modified.
+
+## Native-result smoke test
+
+A CPU smoke test exported Amani's existing `standard/gt512__mv/fit.pkl`: five
+frames with nine Panda joints. Every joint/base value was preserved exactly.
+The native path is
+`/n/lab_storage/ydu_lab/Lab/akiruga/articulated_recon/results/standard/gt512__mv/fit.pkl`,
+with SHA-256 `d024ead3c4b8a4d8ab1ca4f36e3bcbe40af9e244bfac5b042d691fe1a20aea22`.
+The same episode's source metadata declares a 20 Hz control clock; its native
+steps `[5,53,102,151,200]` therefore retain timestamps
+`[0.25,2.65,5.10,7.55,10.00]` seconds. The source packet's action indices and the
+source render's step/timestamp grid were crosschecked before conversion.
+
+The current Panda v2 URDF path declared in Amani's deployed robot module was
+parsed to recover joint order, which matched the native export. The historical
+runtime URDF hash was not recorded and remains unavailable. Original observation
+flags were also absent, so the new actor explicitly retains `observed=false` in
+all five frames instead of inventing evidence. The export remains unverified with
+unresolved metric scale; its original fit file hash was unchanged.
+
+This tests faithful serialization, not reconstruction accuracy. The new artifacts
+are under `results/native-urdf-export-smoke-v1/` in the cluster experiment root.
+Compact local copies are in ignored `outputs/localdiagnostics/native-urdf-export-smoke-v1/`.

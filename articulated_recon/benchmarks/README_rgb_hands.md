@@ -87,6 +87,33 @@ is a reduced-budget diagnostic; the port's default is 300. Receipts report actua
 iterations, visibility, initialization choices and hashes. Preview metrics are
 agreement with **predicted** landmarks, not ground-truth hand/contact accuracy.
 
+## Fresh object mesh tracking
+
+`source_mesh_track.py` consumes that verified hand result plus fresh SAM3 masks,
+SAM3D mesh and the identical learned source geometry. It authenticates the
+upstream hand's original manifest and output hashes before merging downstream
+ancestry. RGB, depth, cameras and native timestamps must match exactly.
+
+The first pass fits 13 uniformly sampled native frames with Amani's existing
+mask association and silhouette/depth pose objective. Only the first frame can
+initialize/refine the shared mesh shape; moving frames are not combined under
+one pose. The SAM3D mesh topology is retained, including the bottle nozzle, with
+no primitive fallback. Its initial support placement is an explicit learned
+table prior. Subsequent pose fitting has no assumed-rest attraction.
+
+Single-view attachment remains unknown because the existing human attachment
+test requires two observed views. No rigid-grasp constraint or executable plan
+is asserted; `planning_ready` stays false. A fit can complete while contact and
+target-robot registration remain unresolved.
+
+```sh
+python benchmarks/source_mesh_track.py \
+  --geometry runs/bottle/unidepth-v1 --masks runs/bottle/sam3 \
+  --asset runs/bottle/sam3d --hand-run runs/rgb-mano \
+  --case bottle --output runs/bottle/source-mesh-track \
+  --keyframes 13 --shape-iters 250 --pose-iters 150 --samples 1500
+```
+
 ## Generated-view diagnostics
 
 `da3_helper_views.py` checks that source view0 exactly matches the deterministic
