@@ -41,3 +41,31 @@ writes `results/block-depth-all-comparison-v1/`, retaining raw audits, both
 frontends, both shape variants, configs, provenance, and rejected attempts. The
 DA3 inference and subsequent CPU experiments must actually finish before any
 results are reported.
+
+## Measured block comparison
+
+The matched CPU experiment completed, using 80 source frames with all points for
+both frontends. All four numerical fits converged. These are source-consistency
+measurements; no reference alignment or physical evaluation was used.
+
+| Diagnostic | UniDepth | DA3 Metric |
+|---|---:|---:|
+| Raw background plane residual, mean of held-out medians | 17.20 mm | 12.60 mm |
+| After identical static calibration | 3.65 mm | 2.80 mm |
+| Raw foreground median camera-Z | 1.103 m | 0.897 m |
+| Free-aspect nonpenetrating dimensions | 53.2×39.7×33.7 mm | 33.6×33.1×32.7 mm |
+| SAM3D-aspect dimensions | 41.9×41.7×41.9 mm | 33.3×33.1×33.3 mm |
+| Maximum pregrasp drift, free/aspect prior | 5.676/2.453 mm | 10.140/10.093 mm |
+| Unchanged planner guard, free/aspect prior | TCP plans produced | Both rejected before simulation |
+
+DA3's static-plane consistency was better and its unconstrained aspect was
+already close to the SAM3D proportions. However, its estimated metric placement
+and size differed substantially. Both DA3 plans exceeded the fixed 10 mm
+pregrasp-motion guard by a small amount. That is a **marginal guard rejection**,
+not proof that physical execution would fail. The guard was not relaxed.
+
+Zero table penetration applies to all four constrained fits, relative to each
+estimated plane. Independent Panda IK, collision, grasp quality, and physical
+success are not established by this comparison. Compact summaries and the four
+scenes/planning receipts are also saved locally under ignored
+`outputs/localdiagnostics/block-depth-all-comparison-v1/`.

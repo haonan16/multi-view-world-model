@@ -5,7 +5,7 @@ frozen robot commands → a separately constructed evaluation simulator.
 
 The code in this directory implements RGB inference, source-scene fitting,
 comparison configuration, frozen planning and independent execution. The block
-pipeline has executed in an independent proxy scene, but its first four RGB-only
+pipeline has executed in an independent proxy scene, but six frozen RGB-only
 plans failed to grasp the object. The world-model-to-successful-execution goal
 has not been demonstrated by these experiments.
 
@@ -20,6 +20,7 @@ has not been demonstrated by these experiments.
 - [Native URDF export to the shared actor format](README_urdf_export.md)
 - [SAM3D shape-prior comparison](README_shape_prior.md)
 - [Matched UniDepth / DA3 Metric experiment](README_depth_comparison.md)
+- [Posthoc sensor-depth and confidence audit](README_confidence_audit.md)
 - `rgb_frontend.py`: isolate one recorded RGB camera, then predict metric depth
   and camera intrinsics with an existing local UniDepthV2 checkpoint.
 - `keyframe_compression.py`: compress saved fitted trajectories and measure the
@@ -123,6 +124,15 @@ The shape prior therefore did not demonstrate a material size or placement
 improvement. These evaluation measurements were withheld from the concurrent
 depth-comparison and hand-fitting work.
 
+Two matched all-point UniDepth controls subsequently executed once each and
+also missed grasp/lift: six new executions in total, zero successful grasps.
+Both DA3 Metric variants were rejected before execution for 10.140/10.093 mm
+pregrasp drift against the fixed 10 mm guard. This marginal rejection is not
+physical failure. Posthoc scoring against the separate proxy found approximately
+33 mm DA3 blocks, 16.3 mm sorted-dimension error and 268/217 mm initial/final
+centre error; the all-point UniDepth control had about 7.65 mm size error and
+87/86 mm centre error. These are single-clip proxy comparisons.
+
 Fresh 25-frame world-model helpers completed with source-latent clamping checked
 at every conditioned forward pass. However, matched static backgrounds moved
 only 0.27/0.30/0.78 pixels, where the requested cameras predict approximately
@@ -139,6 +149,19 @@ the static-background audit. Guidance 0 is still conditioned on the supplied
 text; it is not a null-text condition. This does not establish the root cause
 of weak camera adherence or justify treating the requests as actual poses.
 
+First-source-frame conditioning, matching the author's single-view training
+mask, also failed to establish camera adherence: first two helpers moved matched
+background points about 0.44/0.46 pixels versus 15.34/12.36 requested at time
+zero. The third had only nine retained matches and is inconclusive. Full-clip
+camera-design ancestry remains, so this is a conditioning diagnostic, not a
+strict forecasting result.
+
+The 13-frame HO-Cap bottle generation completed with its own verified task-text
+embedding. Matched backgrounds moved 0.37/0.36/0.60 pixels versus approximately
+60/44/59 requested. Human/object appearance changes do not supply the missing
+viewpoint change. These helpers are therefore not fused under their requested
+poses as if they were calibrated observations.
+
 Fresh RGB-only MANO initialization and the actual RobotFitter port have also
 run on both clips (100-iteration diagnostic budget). The bottle and block port
 stages took 297.0 and 172.7 seconds, respectively. Mean reprojection error to
@@ -149,6 +172,32 @@ The first side-selection diagnostic tested both licensed hand priors but bound
 only the selected prior in its manifest; the current adapter binds both and
 adds an explicit soft detector-handedness-prior alternative. Earlier outputs
 are preserved rather than relabeled.
+
+The right-hand variant reduced source landmark error to 1.744 pixels. Its
+fresh SAM3D bottle mesh was then tracked with the same 13 fitting frames and
+shape/pose budgets. RGB identity tracking at the native 120 frames plus explicit
+predicted-hand occlusion recovered 13/13 associations versus 4/13 for the
+original 3D association gate. Common source-mask IoU rose from 0.306 to 0.779;
+on the four already-supported frames it changed only from 0.774 to 0.795.
+This primarily restores the missing lift segment. The combined change does not
+isolate depth bias from sparse-frame motion or occlusion. The actual SAM3D
+nozzle topology is retained; contact remains unknown and no bottle plan is
+declared ready. See [the detailed bottle comparison](README_rgb_hands.md).
+
+An evaluator-only HO-Cap audit compared these frozen metric depth predictions
+with the corresponding measured depth, without scale correction. UniDepth's
+global top-half confidence ranks retained only 12.7% of predicted hand pixels
+and 27.6% of bottle pixels. Mean absolute depth error increased from 95.8 to
+124.0 mm for the hand and from 198.5 to 232.7 mm for the bottle. Mask-interior
+erosion reduced the errors but did not reverse this selection failure. These
+ranks describe relative, scale-invariant prediction error; they do not certify
+absolute metric scale. This is one clip, not a general calibration benchmark.
+
+On the same bottle clip and all valid pixels, DA3 Metric improved bottle depth
+error from 198.5 to 88.8 mm and table error from 108.0 to 38.2 mm, but worsened
+hand error from 95.8 to 106.4 mm. Together with the opposite block comparison,
+this does not support choosing one depth source globally. All sensor comparisons
+are posthoc evaluation only and were withheld from active fitting workers.
 
 ## Legacy independent-scene control, 2026-11-19
 
@@ -196,6 +245,12 @@ extrinsics define coordinates, not registration to a real robot. The output
 contains camera-Z depth, raw predicted error and an inverse-error **rank**.
 That rank is not a calibrated probability. Table estimation, segmentation,
 object fitting and robot registration are still downstream stages.
+
+[UniDepthV2's own documentation](https://github.com/lpiccinelli-eth/UniDepth/blob/main/assets/docs/V2_README.md)
+describes this output as estimated scale-invariant log error, ranked relative to
+one input. It should not be interpreted as certainty about absolute metric
+scale. The separate sensor-depth audit scores frozen predictions in their
+original metric units and does not rescale them to the reference.
 
 ## Retrospective keyframe diagnostic, 2026-11-19
 

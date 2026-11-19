@@ -73,7 +73,101 @@ def initial_shape_evidence(selected):
     return [selected[0]] + [{} for _ in selected[1:]]
 
 
-def run(*, geometry, masks, asset, hand_run, case, output, keyframes=13, shape_iters=250, pose_iters=150, samples=1500):
+def rgb_identity_track(mask_data, prompt, initial_row):
+    """Conservative single-instance image association, independent of depth."""
+    prompts = list(mask_data['prompts'])
+    if prompt not in prompts or 'hand' not in prompts:
+        raise ValueError('RGB association needs explicit object and hand categories')
+    p = prompts.index(prompt)
+    H, W = mask_data['shape']
+    result, audit, previous = [], [], None
+    for t in range(len(mask_data['timestamps'])):
+        rows = np.flatnonzero((mask_data['t'] == t) & (mask_data['p'] == p) & (mask_data['score'] >= .3))
+        record = dict(source_frame=t, candidates=rows.tolist(), status='ambiguous_or_missing_candidate')
+        chosen = None
+        if len(rows) == 1:
+            row = int(rows[0])
+            mask = np.unpackbits(mask_data['mask'][row])[:H*W].reshape(H, W).astype(bool)
+            y, x = np.nonzero(mask)
+            if len(x):
+                centre = np.array([x.mean(), y.mean()])
+                extent = float(np.hypot(x.max()-x.min(), y.max()-y.min()))
+                if previous is None:
+                    consistent = t == 0 and row == initial_row
+                else:
+                    old_centre, old_extent, old_frame = previous
+                    distance = float(np.linalg.norm(centre-old_centre))
+                    gate = max(20., .5*(extent+old_extent))
+                    consistent = t-old_frame <= 5 and distance <= gate
+                    record.update(centroid_displacement_px=distance, image_gate_px=gate)
+                if consistent:
+                    chosen = row
+                    previous = centre, extent, t
+                    record['status'] = 'unique_candidate_with_image_continuity'
+                else:
+                    record['status'] = 'image_continuity_unresolved'
+        result.append(chosen)
+        record['selected_global_row'] = chosen
+        audit.append(record)
+    return result, audit
+
+
+def mask_first_associations(fitter, source_rows, keyframe_ids, kept_global_rows, prompt):
+    """A valid source mask remains usable when its depth centroid is missing."""
+    lookup = {int(row): i for i, row in enumerate(kept_global_rows)}
+    selected, centres, evidence = [], [], []
+    previous = None
+    for frame, native in enumerate(keyframe_ids):
+        row = source_rows[native]
+        candidates = fitter.instances(prompt, frame, 0)
+        hit = next((c for c in candidates if row is not None and c['i'] == lookup[int(row)]), None)
+        selected.append({0: hit} if hit is not None else {})
+        centre = hit['c'] if hit is not None else None
+        if centre is not None:
+            previous = centre
+        if previous is None:
+            raise ValueError('First-frame mesh shape needs supported predicted depth')
+        centres.append(previous.copy())
+        evidence.append(dict(source_frame=int(native), source_candidate_present=row is not None,
+                             usable_2d_mask=hit is not None,
+                             mask_pixels=int(hit['m'].sum()) if hit is not None else 0,
+                             depth_points=len(hit['P']) if hit is not None else 0,
+                             depth_centroid_available=centre is not None))
+    return selected, np.asarray(centres), np.zeros(len(selected), bool), evidence
+
+
+def make_occlusion_views(obs, hand_masks):
+    """Predicted hand pixels are unobserved object space, never free space."""
+    import torch
+    from mano_recon.amani_objects.geom import DepthViews
+    class OcclusionViews(DepthViews):
+        def __init__(self):
+            super().__init__(obs.depth, obs.K, obs.c2w)
+            self.hand_masks = torch.as_tensor(np.stack([hand_masks[t] for t in range(obs.T)])[:, None], dtype=torch.bool)
+            self.ignored_queries = {'depth': 0, 'silhouette': 0}
+
+        def occluded(self, u, v, frames, view_indices=None, channel=None):
+            ui, vi = u.round().long(), v.round().long()
+            inside = (ui >= 0) & (ui < self.W) & (vi >= 0) & (vi < self.H)
+            ui, vi = ui.clamp(0, self.W-1), vi.clamp(0, self.H-1)
+            B, V, N = u.shape
+            f = torch.as_tensor(frames, device=u.device).view(B, 1, 1).expand(B, V, N)
+            vs = torch.arange(V, device=u.device) if view_indices is None else torch.as_tensor(view_indices, device=u.device)
+            vs = vs.view(1, V, 1).expand(B, V, N)
+            result = self.hand_masks.to(u.device)[f, vs, vi, ui] & inside
+            if channel is not None:
+                self.ignored_queries[channel] += int(result.sum())
+            return result
+
+        def sample(self, u, v, frames, view_indices=None):
+            depth, inside = super().sample(u, v, frames, view_indices=view_indices)
+            ignored = self.occluded(u, v, frames, view_indices=view_indices, channel='depth')
+            return depth, inside & ~ignored
+    return OcclusionViews()
+
+
+def run(*, geometry, masks, asset, hand_run, case, output, keyframes=13, shape_iters=250, pose_iters=150, samples=1500,
+        association='author_depth'):
     import torch
     import trimesh
     from PIL import Image
@@ -156,9 +250,40 @@ def run(*, geometry, masks, asset, hand_run, case, output, keyframes=13, shape_i
     torch.set_num_threads(4)
     torch.manual_seed(0)
     np.random.seed(0)
+    if association not in {'author_depth', 'rgb_identity'}:
+        raise ValueError('Unknown source association policy')
+    sam = Sam3Masks(output / 'sam3-keyframes.npz', H, W)
+    image_track_audit = None
+    if association == 'rgb_identity':
+        source_rows, image_track_audit = rgb_identity_track(mask_data, selection['object_prompt'], selected_row)
+        # SAM3 hand/object overlap is an estimated occlusion, not object depth.
+        object_p, hand_p = sam.prompts.index(selection['object_prompt']), sam.prompts.index('hand')
+        raw_mask = sam.mask
+        hand_masks = {}
+        for t in range(len(ids)):
+            union = np.zeros((H, W), bool)
+            for row in np.flatnonzero((sam.t == t) & (sam.p == hand_p) & (sam.score >= .3)):
+                union |= raw_mask(row)
+            hand_masks[t] = union
+        def visible_object_mask(row, raw=False):
+            mask = raw_mask(row, raw=raw)
+            return mask & ~hand_masks[int(sam.t[row])] if sam.p[row] == object_p else mask
+        sam.mask = visible_object_mask
+    views = make_occlusion_views(obs, hand_masks) if association == 'rgb_identity' else None
     fitter = ObjectsV2(obs, dict(n=table['normal'], d=table['offset']), Hand(), frozen,
-                       Sam3Masks(output / 'sam3-keyframes.npz', H, W), dict(objects=[spec]), log=log)
-    selected, centres, held = fitter.track(spec)
+                       sam, dict(objects=[spec]), log=log, views=views)
+    if association == 'rgb_identity':
+        selected, centres, held, frame_evidence = mask_first_associations(fitter, source_rows, ids,
+                                                                         np.flatnonzero(keep), selection['object_prompt'])
+    else:
+        selected, centres, held = fitter.track(spec)
+        frame_evidence = [dict(source_frame=int(ids[t]), usable_2d_mask=bool(st),
+                              mask_pixels=sum(int(c['m'].sum()) for c in st.values()),
+                              depth_points=sum(len(c['P']) for c in st.values()),
+                              depth_centroid_available=any(c['c'] is not None for c in st.values()))
+                          for t, st in enumerate(selected)]
+    (output / 'association.json').write_text(json.dumps(dict(policy=association, source_frames=image_track_audit,
+                                                            keyframe_evidence=frame_evidence), indent=2))
     if held.any():
         raise RuntimeError('Single-view contact unexpectedly asserted by author tracker')
     observed = frame_observation_flags(selected)
@@ -242,6 +367,11 @@ def run(*, geometry, masks, asset, hand_run, case, output, keyframes=13, shape_i
         output_protocol=output_validation,
         source_frame_ids=ids.tolist(), native_source_frames=len(data['timestamps']), observed_keyframes=int(observed.sum()),
         frame_count=len(ids), actual_camera_count=1, primitive_fallback=False,
+        association_policy=association, keyframe_evidence=frame_evidence,
+        hand_mask_exclusion=association == 'rgb_identity',
+        ignored_hand_projection_queries=dict(views.ignored_queries) if views is not None else None,
+        ignored_query_interpretation='Repeated projected sample evaluations during optimization, not unique evidence pixels',
+        association_change='RGB identity + explicit hand occlusion; combined variant, not a pure association ablation' if association == 'rgb_identity' else None,
         shape_evidence_native_frames=[0], shared_pose_extra_frames=[],
         selected_global_mask_row=selected_row,
         retained_sam3d_vertices=len(mesh.vertices), retained_sam3d_faces=len(mesh.faces),
@@ -267,4 +397,5 @@ if __name__ == '__main__':
     parser.add_argument('--shape-iters', type=int, default=250)
     parser.add_argument('--pose-iters', type=int, default=150)
     parser.add_argument('--samples', type=int, default=1500)
+    parser.add_argument('--association', choices=['author_depth', 'rgb_identity'], default='author_depth')
     run(**vars(parser.parse_args()))

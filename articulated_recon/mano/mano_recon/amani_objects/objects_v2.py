@@ -478,6 +478,9 @@ class ObjectsV2:
                     dpx = torch.nn.functional.grid_sample(dt[None, None].expand(B, 1, -1, -1), g, align_corners=True)[:, 0, 0]
                     D, _ = self.views.sample(u[:, v:v + 1], vv[:, v:v + 1], [tf] * B, view_indices=[v])
                     occl = (D[:, 0] > 0) & (D[:, 0] < z[:, v] - 0.015)          # something in front of the model
+                    if hasattr(self.views, "occluded"):
+                        occl = occl | self.views.occluded(u[:, v:v + 1], vv[:, v:v + 1],
+                                                          [tf] * B, view_indices=[v], channel="silhouette")[:, 0]
                     wv = (inside & ~occl).float()
                     out = (rho(dpx / 4.0, 1.0) * wv).sum(1) / wv.sum(1).clamp(min=1)
                     uvm = torch.stack([ui, vi], -1)                             # B,N,2

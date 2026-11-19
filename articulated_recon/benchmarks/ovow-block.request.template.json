@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "baseline": "ovow",
+  "checkout": "REPLACE_WITH_PINNED_OVOW_CHECKOUT",
+  "input_manifest": "REPLACE_WITH_VERIFIED_RGB_VIDEO_MANIFEST.json",
+  "rgb_artifact_id": "source_rgb_video",
+  "input_scope": "full_clip",
+  "output_dir": "REPLACE_WITH_NEW_OUTPUT_DIRECTORY",
+  "gpu": "0",
+  "timeout_seconds": 1800,
+  "minimum_free_gb": 20,
+  "allow_localized_checkout": false,
+  "required_paths": [
+    "ckpts/OnePoseViaGen",
+    "ckpts/hy3dgen",
+    "ckpts/moge-vitl/model.pt",
+    "ckpts/sam3/sam3.pt",
+    "third_party/Motion324/experiments/checkpoints"
+  ]
+}

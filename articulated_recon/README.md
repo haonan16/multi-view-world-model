@@ -16,7 +16,7 @@ packaged separately from the robot pipeline and uses prepared observations.
 separate learned depth/cameras from the calibrated results below. The human
 branch includes fresh RGB initialization, shared scene exports, fixed-deployment
 planning and a sealed independent-scene executor. Passing a geometry check does
-not establish execution success; the first four RGB-only block plans missed
+not establish execution success; six frozen RGB-only block plans missed
 the reference object.
 
 Both fitters can export actor states through the [shared sequence format](benchmarks/README_urdf_export.md).

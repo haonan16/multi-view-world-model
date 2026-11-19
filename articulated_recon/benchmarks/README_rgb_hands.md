@@ -95,7 +95,15 @@ upstream hand's original manifest and output hashes before merging downstream
 ancestry. RGB, depth, cameras and native timestamps must match exactly.
 
 The first pass fits 13 uniformly sampled native frames with Amani's existing
-mask association and silhouette/depth pose objective. Only the first frame can
+mask association and silhouette/depth pose objective. `--association rgb_identity`
+instead associates unique SAM3 candidates through every native RGB frame using
+image continuity, then fits the same keyframes. Ambiguous detections remain
+unknown. A valid image mask survives a missing or inconsistent depth centroid.
+This variant also excludes predicted hand pixels from object foreground points,
+depth evidence and the outside-silhouette penalty; it does not label those pixels
+as free space. Both object and hand candidate thresholds are 0.3.
+
+Only the first frame can
 initialize/refine the shared mesh shape; moving frames are not combined under
 one pose. The SAM3D mesh topology is retained, including the bottle nozzle, with
 no primitive fallback. Its initial support placement is an explicit learned
@@ -114,6 +122,53 @@ python benchmarks/source_mesh_track.py \
   --keyframes 13 --shape-iters 250 --pose-iters 150 --samples 1500
 ```
 
+## Measured bottle diagnostic, 19 November 2026
+
+The source is 120 recorded HO-Cap RGB frames from one camera at 30 fps. All
+depth, intrinsics, masks and hand initialization in these runs are model
+estimates. Dataset calibration, sensor depth and simulator feedback are not
+inputs. These are single-source-view diagnostics, not a validated multiview
+reconstruction or execution result.
+
+The handedness-prior variant selected the right hand. After the same
+100-iteration port budget, agreement with predicted image landmarks improved
+from 2.737 px mean in the earlier left-hand diagnostic to 1.744 px. Source
+overlays improved, but the independent display camera still reveals fingers
+that look too spread/flat around the bottle. This score does not establish
+correct hidden fingers or physical contact.
+
+For the mesh, the same fresh SAM3D asset, right-hand result, 13 fitting frames
+and 250/150 shape/pose iteration budgets were reused:
+
+| Source-only measurement | Author 3D association, v1 | RGB identity + hand occlusion, v2 |
+| --- | ---: | ---: |
+| Fitting frames with object association | 4/13 | 13/13 |
+| Visible-mask IoU, all 13 frozen poses | 0.306 | 0.779 |
+| Visible-mask IoU, four already-supported frames | 0.774 | 0.795 |
+| Visible-mask IoU, nine recovered frames | 0.098 | 0.771 |
+| Median agreement with predicted source depth | 38.5 mm | 7.08 mm |
+| Object fitting CPU time | 29.8 s | 36.4 s |
+
+The four common-supported native frames are 0, 10, 20 and 119. All-pose scores
+include v1's explicitly unobserved, frozen fallback poses. The principal gain
+is recovering the lift segment, rather than a large improvement on frames v1
+already tracked. The actual SAM3D topology/nozzle is retained in both fits.
+
+This is a **combined variant**, not a clean test of depth bias alone: v1 applies
+its fixed 5 cm 3D association gate at the 13 sampled frames, whereas v2 tracks
+image identity over all 120 native frames and adds explicit hand occlusion.
+All 13 v2 keyframes have usable predicted-depth centroids. Ordinary motion
+between sparse frames and depth bias have not yet been separated as causes of
+the original gate rejection. The metrics compare against SAM3/UniDepth model
+outputs; they do not establish ground-truth 3D accuracy. Contact and robot
+registration remain unresolved, and neither fit is marked planning-ready.
+
+`mesh_track_source_metrics.py` computes this common reference comparison.
+`preview_source_mesh.py` renders recorded RGB, the actual fitted hand/object,
+and a display-camera 3D view at the native 30 fps. It labels pose interpolation
+between fitting frames, hides/labels missing associations, and identifies the
+table footprint as illustrative rather than reconstructed table dimensions.
+
 ## Generated-view diagnostics
 
 `da3_helper_views.py` checks that source view0 exactly matches the deterministic
@@ -126,3 +181,12 @@ source evidence before metric reconstruction.
 category and hands from background correspondences. Camera requests are
 conditioning hypotheses, not measured generated-view calibration. Its parallax
 test measures internal consistency using learned source depth/K, not GT accuracy.
+
+The completed bottle helper run used the correct author-encoded prompt,
+"Pick up the pump bottle," and 13 frames of the source motion. Its three helper
+views changed the actor's appearance but did not follow the requested camera
+parallax: median static-background shifts were 0.37, 0.36 and 0.60 px versus
+requested shifts of 60.3, 43.6 and 58.7 px under the learned source geometry.
+This rejects treating those requested poses as verified helper calibration
+under the tested conditioning. Cold scheduler wall time was 16m14s on an A100
+3g.20gb MIG slice; the timed model stage was 363.8s, peak allocation 7.61 GB.

@@ -110,3 +110,68 @@ is distinct from giving it the independent evaluator's scene. Record this
 difference when comparing its agent budget to a method with no reconstruction
 simulation. Our downstream robot plan remains frozen before independent
 execution, with no evaluator feedback sent back for reconstruction or planning.
+
+## Cluster readiness audit — November 19, 2026
+
+**Neither baseline has been reproduced or is ready to launch.** This was a
+read-only check of the pinned upstream documentation, known project roots,
+named model caches and installed-package metadata. No environments, models,
+containers or datasets were downloaded; no GPU or paid inference was started.
+"Not found" below means not found in those bounded locations, not a global
+search of the shared filesystem.
+
+| Component | What was actually found | Consequence |
+| --- | --- | --- |
+| SceneRig / OVOW checkouts and native environments | Neither checkout or named environment in the checked roots | Installation and upstream smoke tests remain necessary |
+| SAM3 | Two caches of the same Transformers `model.safetensors` revision, 3.44 GB each | Neither is the native `sam3.pt` expected by these releases; compatibility/conversion is not established |
+| SAM3D | Native checkpoint directory and torch 2.5.1+cu121 environment | Candidate reuse for SceneRig; its vendored code/environment still needs validation. Two zero-byte encoder files prevent a blanket completeness claim |
+| MoGe | Native MoGe-v1 `model.pt`, 1.257 GB; MoGe-2-normal `model.pt`, 1.324 GB | Candidate native reuse for OVOW and SceneRig respectively; the latter exactly matches SceneRig's declared model ID |
+| Qwen | Qwen2.5-VL and unversioned Qwen-Image-Edit caches | Neither proves availability of OVOW's Qwen3-VL-8B or SceneRig's Qwen-Image-Edit-2509; do not substitute them silently |
+| OVOW reconstruction and deformation | No OnePoseViaGen/Hi3DGen, FoundationPose, SpaTrackerV2, RoMaV2, Motion324 or Hunyuan3D-2 caches found | Most native baseline dependencies remain missing |
+| SceneRig remaining backends | No MolmoPoint-8B, SHARP, LanPaint runtime or Isaac environment found | Substantial installation remains |
+| Runtime | Login node glibc 2.28; no Blender on PATH; Singularity exists | SceneRig's Isaac requires glibc ≥2.35. Compute-node/container compatibility is untested; presence of Singularity is not an installed solution |
+
+The existing `test2` torch 2.9.0+cu129 environment is not OVOW's released
+three-environment stack (opg 2.4.1+cu121, SAM3 2.7.0+cu118, motion 2.4.1+cu124).
+Finding a working SAM3/SAM3D setup for our method does not establish that either
+external pipeline runs unchanged.
+
+**Preferred first external run: OVOW, one complete block clip, native default
+`uplegacy` backbone and local Qwen3-VL.** It supplies the sequence geometry and
+motion comparison, avoids a required remote labeling API, and has a smaller
+advertised installation than SceneRig. Do not replace its mesh generator with
+our cached SAM3D, hand-author object labels, suppress the hand's deformable
+branch, or skip full-chain artifacts and call that the released baseline.
+SceneRig remains a later first-frame geometry comparison, not a motion baseline.
+
+Upstream resource figures, not measurements on our data:
+
+- [OVOW README](https://github.com/SparcAI-Inc/OVOW/blob/0078fa2bab641f6dd334b80381fced05a273bb10/README.md):
+  approximately 120 GB installed, roughly 55 GB checkpoint downloads,
+  30–60 minutes for environment creation, ≥40 GB VRAM recommended, and
+  19–22 minutes for its 108-frame 768×768 full-video example. The
+  [download script](https://github.com/SparcAI-Inc/OVOW/blob/0078fa2bab641f6dd334b80381fced05a273bb10/download_ckpts.sh)
+  lists about 41 GB for Hunyuan3D-2 alone. Qwen3-VL is not downloaded by that
+  script, so its additional local footprint must be checked before reserving
+  storage. Our clip runtime is unknown; do not scale this figure linearly by
+  frame count. No TRELLIS2 add-on is needed for the native default backbone.
+- [SceneRig README](https://github.com/Red-Fairy/SceneRig/blob/2defb4b112d5abce28ab1f2bea8aac014b31533e/README.md):
+  approximately 150 GB installed and a required Claude agent API even for
+  preprocessing. A trustworthy per-scene runtime/API cost was not given in
+  the inspected setup documentation. Cached weights can reduce downloads
+  only after native compatibility is verified.
+
+The filesystem reported 292.77 GB free at this audit. That is a changing shared
+capacity snapshot, not a storage allocation. Exact **additional** disk and
+GPU/API budgets remain unresolved; installing both now would be inappropriate.
+
+The portable [OVOW request template](ovow-block.request.template.json) is
+intentionally incomplete and cannot run as-is. First provision the pinned
+checkout/native dependencies; review localized paths and set native
+`QWEN_BACKEND=local`; materialize a source-only video manifest with verified
+hashes/timestamps; then replace the template paths. Its 30-minute timeout is a
+proposed cap, not a measured ETA. Run the adapter without `--execute` and the
+upstream artifact-checking smoke test before launching our block clip. Model
+imports, native-checkpoint compatibility, GPU driver and full-chain output
+completeness remain untested. No simulator plan can yet be attributed to either
+external method.
