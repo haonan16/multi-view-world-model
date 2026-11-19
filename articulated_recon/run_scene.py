@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from artirecon.data import load_dense, load_gt512
 from artirecon.robot import URDFRobot
 from artirecon.scene_fit import SceneFitter
+from artirecon.urdf_scene_exports import export_native_urdf
 
 src, scene, cond = sys.argv[1:4]
 out = Path(sys.argv[4] if len(sys.argv) > 4 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "results"))
@@ -32,8 +33,11 @@ def log(s):
 
 
 t0 = time.time()
-sf = SceneFitter(obs, log=log, robot=URDFRobot(n_pts_per_m2=20000)).run()
+robot_model = URDFRobot(n_pts_per_m2=20000)
+sf = SceneFitter(obs, log=log, robot=robot_model).run()
 res = dict(label=obs.label, source=src, scene=scene, condition=cond, steps=obs.steps, views=obs.meta.get("views"),
            robot=sf.rob, objects=sf.objects, plane=(sf.prep["n"], sf.prep["d"]), timing=sf.timing, tcp=sf.tcp)
 pickle.dump(res, open(d / "fit.pkl", "wb"))
+shared = export_native_urdf(res, robot_model, d, metadata_path=os.environ.get("AR_SCENE_EXPORT_METADATA"), overwrite=True)
+log(f"shared scene export: {shared['status']}" + (f" ({shared['reason']})" if 'reason' in shared else ''))
 log(f"saved {d}  total {time.time() - t0:.1f}s")

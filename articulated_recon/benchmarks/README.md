@@ -3,9 +3,11 @@
 Target: recorded RGB or an RGB-conditioned forecast → estimated scene/motion →
 frozen robot commands → a separately constructed evaluation simulator.
 
-The code in this directory implements input preparation, validation, comparison
-configuration and evaluation submission. It does not constitute a completed
-RGB-only reconstruction or a successful independent simulator rollout.
+The code in this directory implements RGB inference, source-scene fitting,
+comparison configuration, frozen planning and independent execution. The block
+pipeline has executed in an independent proxy scene, but its first four RGB-only
+plans failed to grasp the object. The world-model-to-successful-execution goal
+has not been demonstrated by these experiments.
 
 - [Protocol and staged comparison matrix](README_protocol.md)
 - [External baseline installation and launch adapters](README_external_baselines.md)
@@ -14,6 +16,10 @@ RGB-only reconstruction or a successful independent simulator rollout.
 - [Fixed-registration TCP planning](README_registered_plan.md)
 - [Frozen execution in an independent reference scene](README_execution.md)
 - [Generated-camera consistency diagnostic](README_camera_audit.md)
+- [Fresh RGB-only MANO fitting](README_rgb_hands.md)
+- [Native URDF export to the shared actor format](README_urdf_export.md)
+- [SAM3D shape-prior comparison](README_shape_prior.md)
+- [Matched UniDepth / DA3 Metric experiment](README_depth_comparison.md)
 - `rgb_frontend.py`: isolate one recorded RGB camera, then predict metric depth
   and camera intrinsics with an existing local UniDepthV2 checkpoint.
 - `keyframe_compression.py`: compress saved fitted trajectories and measure the
@@ -91,6 +97,32 @@ while depth surface residual increased from about 2.4 to 3.0 mm and the inferred
 box became flatter. These are source-model consistency metrics, not GT shape
 accuracy or execution success. No endpoint was moved after planning.
 
+Using only the fresh SAM3D canonical mesh's aspect ratios (not its camera pose
+or metric scale) restored approximately cubic 42 mm dimensions. This worsened
+predicted-depth residual while improving support agreement. The fitted object
+remains a cuboid envelope with fixed orientation, not a tracked SAM3D mesh.
+
+Four plans—free/aspect-constrained shape crossed with within-object/soft
+confidence ranks—were then sealed and each executed exactly once. All failed
+to grasp or lift the independent reference block. Initial reconstructed-centre
+error was approximately 87–92 mm; the gripper closed in empty space. TCP
+tracking at the end of closure was about 0.042 mm, showing that the command
+target itself was wrong. No plan, geometry or controller was updated from these
+outcomes. The reference is a separately reconstructed RGB-D proxy, not exact
+CAD ground truth, and its unchanged support has a 1.435-degree tilt plus an
+initial 9.284 mm object/plane gap. No individual method was aligned or snapped
+to this reference. The deployment transform was one shared virtual setup,
+not a measured physical robot calibration.
+
+The post-run audit found roughly 84–91 mm underestimated source-camera depth,
+despite centre projections agreeing within about 1.5 pixels. The common rigid
+deployment preserves the placement discrepancy. Against the proxy's oriented
+bounding dimensions, sorted-dimension error remained approximately 7–8 mm
+for every variant and estimated volume remained 59–62% of the proxy volume.
+The shape prior therefore did not demonstrate a material size or placement
+improvement. These evaluation measurements were withheld from the concurrent
+depth-comparison and hand-fitting work.
+
 Fresh 25-frame world-model helpers completed with source-latent clamping checked
 at every conditioned forward pass. However, matched static backgrounds moved
 only 0.27/0.30/0.78 pixels, where the requested cameras predict approximately
@@ -100,6 +132,12 @@ fix this: the first two helpers remained source-like, and the third's matched
 motion disagreed with its requested camera. Requested poses therefore cannot
 be treated as verified extrinsics for fusion. These diagnostics use predicted
 depth/K and correlated background matches, not GT camera measurements.
+
+A 17-frame prefix diagnostic also tested text/history guidance 2/1, 2/0 and
+0/0 with the same camera requests and seed. All three remained source-like in
+the static-background audit. Guidance 0 is still conditioned on the supplied
+text; it is not a null-text condition. This does not establish the root cause
+of weak camera adherence or justify treating the requests as actual poses.
 
 Fresh RGB-only MANO initialization and the actual RobotFitter port have also
 run on both clips (100-iteration diagnostic budget). The bottle and block port

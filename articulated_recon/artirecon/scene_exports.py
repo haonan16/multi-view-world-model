@@ -40,10 +40,25 @@ def fit_timestamps(observations, frames, fps, *, require_supplied=False):
     return values, method
 
 
+def declared_coordinate_frame(protocol, require_explicit=False):
+    """Preserve the frame named by input preparation; never infer registration."""
+    frame=protocol.get('coordinate_frame')
+    if frame is None:
+        if require_explicit:
+            raise SceneValidationError('Verified hand inputs require an explicit coordinate_frame')
+        return {'name':'reconstruction_world','handedness':'right','up_axis':'unknown','pose_convention':'T_world_local'}
+    if (not isinstance(frame,dict) or not isinstance(frame.get('name'),str) or not frame['name'].strip()
+            or frame.get('handedness')!='right' or frame.get('pose_convention')!='T_world_local'
+            or frame.get('up_axis') not in {'+x','-x','+y','-y','+z','-z','unknown'}):
+        raise SceneValidationError('Invalid declared hand coordinate_frame')
+    return deepcopy(frame)
+
+
 def mano_fit_scene(*, q, base, betas, timestamps, point_counts, visible,
                    model_uri, input_protocol=None, support_normal=None,
                    support_offset=None, timestamp_method="supplied timestamps in seconds",
-                   task_description="Track a human hand through the observed sequence"):
+                   task_description="Track a human hand through the observed sequence",
+                   coordinate_frame=None):
     """Export MANO + an optional supplied table without inventing observations.
 
     ``visible`` alone is not evidence: a frame is observed only when visibility
@@ -106,8 +121,7 @@ def mano_fit_scene(*, q, base, betas, timestamps, point_counts, visible,
         model_uri=str(model_uri), observed=observed, provenance=provenance)
     scene = scene_from_arrays(
         timestamps=timestamps,
-        coordinate_frame={"name": "reconstruction_world", "handedness": "right",
-                          "up_axis": "unknown", "pose_convention": "T_world_local"},
+        coordinate_frame=declared_coordinate_frame({'coordinate_frame':coordinate_frame}),
         metric_scale=scale, actors=[actor], objects=[], support=support, contacts=[],
         uncertainty={"status": "unestimated"},
         task={"description": task_description, "target": None})

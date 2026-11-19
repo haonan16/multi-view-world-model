@@ -21,6 +21,7 @@ from artirecon.export import scene_json, viewer_json
 from artirecon.render import overlay, render, scene_parts
 from artirecon.robot import URDFRobot
 from artirecon.scene_fit import SceneFitter
+from artirecon.urdf_scene_exports import export_native_urdf
 
 ROOT = Path(os.path.dirname(os.path.abspath(__file__))) / "results"
 FORCE = "--force" in sys.argv
@@ -168,6 +169,8 @@ for job in [a for a in sys.argv[1:] if not a.startswith("--")]:
             res = fit(scene, src, cond, run, d, log)
             pickle.dump(res, open(d / "fit.pkl", "wb"))
         res = pickle.load(open(d / "fit.pkl", "rb"))
+        shared = export_native_urdf(res, ROBOT, d, metadata_path=os.environ.get("AR_SCENE_EXPORT_METADATA"), overwrite=True)
+        log(f"shared scene export: {shared['status']}" + (f" ({shared['reason']})" if 'reason' in shared else ''))
         post(res, scene, src, run, d, log)
         log(f"DONE {job}")
     except Exception:

@@ -28,7 +28,7 @@ def main():
     case=run/'inputs'/a.case
     sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
     from artirecon.input_protocol import load_manifest, unverified_report, ProtocolError
-    from artirecon.scene_exports import fit_timestamps, mano_fit_scene
+    from artirecon.scene_exports import fit_timestamps, mano_fit_scene, declared_coordinate_frame
     input_protocol=unverified_report()
     if a.input_manifest:
         if a.calibrate:
@@ -58,6 +58,7 @@ def main():
             print('Existing complete hand fit',a.case,flush=True);return
     z=np.load(case/'obs.npz');h=np.load(case/'hand-input.npz');meta=json.loads((case/'protocol.json').read_text())
     mano_side=declared_mano_side(meta,require_explicit=bool(a.input_manifest))
+    coordinate_frame=declared_coordinate_frame(meta,require_explicit=bool(a.input_manifest))
     T=a.limit_frames or len(z['depth_m']);D=z['depth_m'][:T]
     timestamps,timestamp_method=fit_timestamps(z,T,meta.get('fps'),require_supplied=bool(a.input_manifest))
     obs=SimpleNamespace(depth=D,K=z['K'],c2w=z['c2w'],T=T,V=D.shape[1])
@@ -126,6 +127,7 @@ def main():
                         timestamps=timestamps,point_counts=h['counts'][:T],visible=visible,
                         model_uri=(a.models or run/'assets/mano').resolve()/f'MANO_{robot.hand.side.upper()}.npz',
                         input_protocol=input_protocol,support_normal=n,support_offset=d,
+                        coordinate_frame=coordinate_frame,
                         timestamp_method=timestamp_method,task_description=f'Fit the human hand in the {a.case} sequence')
     scene_path=out/'scene-sequence.json'
     scene_path.write_text(json.dumps(scene,indent=2,allow_nan=False))

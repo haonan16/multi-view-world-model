@@ -1,8 +1,9 @@
 # RGB-only reconstruction comparison protocol
 
-This is a staged experiment plan and input validator. **It launches no jobs and
-contains no new benchmark results.** Model checkpoints, exact RGB clips, budgets
-and the independent evaluation scene still need binding before a run is frozen.
+This document defines the staged experiment plan and input validator. See
+[the measured run status](README.md) for completed conditions and failures;
+listing a condition here does not mean it has run. Model checkpoints, exact RGB
+clips, budgets and the evaluation boundary must be bound for each frozen run.
 
 ## First batch
 
@@ -120,7 +121,7 @@ physical success, and it does not seal or execute a plan.
 
 ## Reporting
 
-`freeze_submission.py` provides an audit interface between a future registered
+`freeze_submission.py` provides an audit interface between the registered
 planner and independent evaluator. `freeze` binds the validated shared scene,
 input manifest, command file, producer metadata, planner/executor files and
 controller configuration. It accepts no evaluation-scene argument. The
@@ -133,7 +134,9 @@ the protocol digest, robot-registration artifact, coordinate frame and command
 format, and declare `simulator_feedback_used=false`. Hash checks enforce declared
 file identity, not process isolation or truthfulness of historical data access.
 The legacy action compiler still recenters motion and its executor builds the
-reconstructed scene; those modules are not yet the independent evaluator.
+reconstructed scene. Use the separate `registered_plan.py`, `independent_scene.py`
+and `execute_registered.py` route for the new fixed-registration experiment;
+do not relabel legacy rollouts as independent evaluation.
 
 The shared measurement template initializes geometry, contact/clearance,
 trajectory, execution, stage runtime and agent-effort values to **null**, meaning

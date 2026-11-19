@@ -74,7 +74,21 @@ def transform_grid(array, crop, size, *, mask=False):
                       interpolation=cv2.INTER_NEAREST if mask else cv2.INTER_LINEAR)
 
 
-def run(*, generated, condition, geometry, masks, output):
+def dynamic_prompt_ids(prompts, object_prompts=None):
+    """Exclude exact task-object categories and hands from background evidence."""
+    if 'hand' not in prompts:raise ValueError('Hand masks are required for static-background exclusion')
+    if object_prompts is None:
+        selected=[p for p in prompts if 'block' in p.split() or p in {'object','cube'}]
+    else:
+        selected=list(object_prompts)
+        if (not selected or len(set(selected))!=len(selected) or
+                any(not isinstance(p,str) or p not in prompts or p=='hand' for p in selected)):
+            raise ValueError('Each explicit object prompt must match a distinct SAM3 object category')
+    if not selected:raise ValueError('Object masks are required for static-background exclusion')
+    return [prompts.index('hand')]+[prompts.index(p) for p in selected]
+
+
+def run(*, generated, condition, geometry, masks, output, object_prompts=None):
     generated, condition, geometry, masks, output = map(lambda p: Path(p).resolve(), (generated, condition, geometry, masks, output))
     if output.exists(): raise FileExistsError(output)
     load_manifest(generated/'input-manifest.json', [('rgb', generated/'observations.npz')])
@@ -108,8 +122,7 @@ def run(*, generated, condition, geometry, masks, output):
     with np.load(masks,allow_pickle=False) as z:
         shape=tuple(z['shape']); mask_t=z['t'].copy(); mask_p=z['p'].copy(); packed=z['mask'].copy(); prompts=z['prompts'].tolist()
         if not np.array_equal(z['timestamps'],native_times): raise ValueError('SAM3/source timestamps differ')
-    dynamic_ids=[i for i,p in enumerate(prompts) if p=='hand' or 'block' in p.split() or p in {'object','cube'}]
-    if 'hand' not in prompts or len(dynamic_ids)<2: raise ValueError('Hand/object masks are required for static-background exclusion')
+    dynamic_ids=dynamic_prompt_ids(prompts,object_prompts)
     output.mkdir(parents=True)
     rows, pooled = [], {v:[] for v in range(4)}
     for frame,source_id in enumerate(ids):
@@ -162,6 +175,7 @@ def run(*, generated, condition, geometry, masks, output):
         generated=str(generated),source_condition_sha256=file_sha256(condition/'condition.npz'),
         generated_sha256=file_sha256(generated/'generated.npz'),geometry_sha256=file_sha256(geometry),masks_sha256=file_sha256(masks),
         producer_sha256=file_sha256(__file__),source_crop_xywh=crop,summaries=summaries,per_frame=rows,
+        excluded_dynamic_prompts=[prompts[i] for i in dynamic_ids],
         GT_used=False,measured_depth_used=False,simulation_used=False,
         reading='Flow fraction near 0 favors copying/source-like camera; near 1 follows requested parallax. Identity residual equals observed displacement. Magenta segments join measured green matches to their requested-camera projection.',
         limitations=['Estimated depth/K can be wrong; this measures internal consistency, not true camera accuracy.',
@@ -175,4 +189,5 @@ def run(*, generated, condition, geometry, masks, output):
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     for name in ['generated','condition','geometry','masks','output']:parser.add_argument('--'+name,type=Path,required=True)
+    parser.add_argument('--object-prompt',dest='object_prompts',action='append',help='Exact SAM3 task-object category to exclude; repeat for multiple categories')
     run(**vars(parser.parse_args()))

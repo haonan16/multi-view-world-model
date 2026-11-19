@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from artirecon.scene_exports import fit_timestamps, mano_fit_scene
+from artirecon.scene_exports import fit_timestamps, mano_fit_scene, declared_coordinate_frame
 from artirecon.scene_sequence import SceneValidationError, load_scene
 
 
@@ -65,6 +65,25 @@ def test_declared_verified_scale_and_condition_preserved_without_registration():
     assert scene["export_scope"]["robot_registration_established_by_export"] is False
     report["metric_scale"]["status"] = "known"
     assert scene["input_protocol"]["metric_scale"]["status"] == "estimated"
+
+
+def test_source_camera_frame_is_preserved_without_moving_hand_states():
+    arrays=fitted_arrays()
+    frame={'name':'source_camera','handedness':'right','up_axis':'unknown','pose_convention':'T_world_local'}
+    scene=mano_fit_scene(**arrays,input_protocol=verified_protocol(),coordinate_frame=frame)
+    assert scene['coordinate_frame']==frame
+    np.testing.assert_array_equal(scene['actors'][0]['T_world_base'],arrays['base'])
+    frame['name']='changed'
+    assert scene['coordinate_frame']['name']=='source_camera'
+    assert scene['input_protocol']['robot_registration']['status']=='unresolved'
+
+
+def test_verified_coordinate_frame_cannot_default_to_a_different_named_space():
+    with pytest.raises(SceneValidationError,match='explicit coordinate_frame'):
+        declared_coordinate_frame({},require_explicit=True)
+    assert declared_coordinate_frame({})['name']=='reconstruction_world'
+    with pytest.raises(SceneValidationError,match='Invalid declared'):
+        declared_coordinate_frame({'coordinate_frame':{'name':'source_camera'}},True)
 
 
 @pytest.mark.parametrize("change", [

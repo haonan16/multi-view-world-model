@@ -42,6 +42,21 @@ def test_forecast_encodes_only_one_source_frame():
         m.source_tensor(np.repeat(rgb,9,axis=0),forecast=True,total_frames=9)
 
 
+def test_first_frame_diagnostic_does_not_encode_or_restore_later_recorded_frames():
+    m=module();rgb=np.arange(17*4*8*3,dtype=np.uint8).reshape(17,4,8,3)
+    pixels,known=m.reconstruction_condition(rgb,'first_frame_diagnostic')
+    assert known.sum()==1 and known[0,0]
+    assert not pixels[:,1:].any() and not pixels[:,:,1:].any()
+    raw=np.full((17,4,4,8,3),73,np.uint8)
+    restored=m.restore_observed_source(raw,rgb,known)
+    assert np.array_equal(restored[0,0],rgb[0])
+    assert np.array_equal(restored[1:,0],raw[1:,0])
+    assert np.array_equal(restored[:,1:],raw[:,1:])
+    full,full_known=m.reconstruction_condition(rgb,'full_source')
+    assert full_known[:,0].all() and not full_known[:,1:].any()
+    assert np.array_equal(m.restore_observed_source(raw,rgb,full_known)[:,0],rgb)
+
+
 @pytest.mark.parametrize('target',[[0,0,-1],[0,0,0],[0,float('nan'),1]])
 def test_invalid_camera_target_rejected(target):
     with pytest.raises(ValueError):module().virtual_cameras(target)

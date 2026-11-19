@@ -62,6 +62,20 @@ def source_tensor(rgb, views=4, forecast=False, total_frames=None):
     return pixels, known
 
 
+def reconstruction_condition(rgb, mode):
+    """First-frame mode is a diagnostic: its camera ancestry still uses the clip."""
+    if mode=='full_source':return source_tensor(rgb)
+    if mode=='first_frame_diagnostic':return source_tensor(rgb[:1],forecast=True,total_frames=len(rgb))
+    raise ValueError('Unknown source-conditioning mode')
+
+
+def restore_observed_source(raw, source, known):
+    if known.shape!=raw.shape[:2] or known[:,1:].any():
+        raise ValueError('Only declared source-view pixels may be restored')
+    output=raw.copy();output[known[:,0],0]=source[known[:,0]]
+    return output
+
+
 def prepare(*, geometry_bundle, scene_path, scene_manifest, output, frames=25):
     """Prepare reconstruction helper views from estimated source geometry only."""
     import cv2
@@ -249,7 +263,7 @@ def configure_text_conditioning(algo, prompt_key, *, null_text, text_guidance, c
 
 def generate(*, condition, repository, config, checkpoint, checkpoint_receipt, output,
              prompt_key='task_0004', seed=20261119, text_guidance=2., hist_guidance=1., null_text=False,
-             text_embeddings=None,text_embedding_receipt=None):
+             text_embeddings=None,text_embedding_receipt=None,conditioning='full_source'):
     """Run the unchanged author sampler, verifying source-latent clamping."""
     import torch
     import imageio.v2 as imageio
@@ -276,7 +290,7 @@ def generate(*, condition, repository, config, checkpoint, checkpoint_receipt, o
     from datasets.aria_new import camera_to_raymap
     with np.load(condition/'condition.npz',allow_pickle=False) as z:
         rgb,k,c,times,ids=[z[n].copy() for n in ['rgb','K','c2w','timestamps','source_frame_indices']]
-    tensor,known=source_tensor(rgb)
+    tensor,known=reconstruction_condition(rgb,conditioning)
     cfg=OmegaConf.load(config)
     expected_conditioned_calls=checked_guidance(text_guidance,hist_guidance,cfg.algorithm.sample_steps)
     if null_text and text_guidance!=0: raise ValueError('Explicit null text requires --text-guidance 0')
@@ -299,7 +313,10 @@ def generate(*, condition, repository, config, checkpoint, checkpoint_receipt, o
         preparation_sha256=file_sha256(condition/'preparation.json'),conditioning_frames=len(rgb),
         source_time_range_s=[float(times[0]),float(times[-1])],target_view_observed_anchors=0,
         extra_observed_views=0,camera_design_horizon=prep.get('camera_design_horizon','Full source-clip initializer'),
-        conditioning_horizon=prep.get('conditioning_horizon','Full sampled source clip'),custom_text_conditioning=custom_text)
+        conditioning_horizon=prep.get('conditioning_horizon','Full sampled source clip'),custom_text_conditioning=custom_text,
+        conditioning_mode=conditioning,observed_source_frames=int(known[:,0].sum()),
+        observed_source_time_range_s=[float(times[known[:,0]][0]),float(times[known[:,0]][-1])],
+        strict_forecasting_claim=False)
     if custom_text:sampling_config['text_conditioning']='custom_task_prompt'
     (output/'sampling-config.json').write_text(json.dumps(sampling_config,indent=2))
     sampling_config_sha256=file_sha256(output/'sampling-config.json')
@@ -321,7 +338,9 @@ def generate(*, condition, repository, config, checkpoint, checkpoint_receipt, o
         lat,cond=algo.pack(batch)
         if lat.ndim!=6 or lat.shape[1]!=4 or lat.shape[2]!=16 or lat.shape[3]!=(len(rgb)-1)//4+1:
             raise ValueError('Unexpected packed multiview VAE layout')
-        hm=torch.zeros(lat.shape[:2]+lat.shape[3:4],dtype=torch.bool,device=lat.device);hm[:,0,:]=True
+        hm=torch.zeros(lat.shape[:2]+lat.shape[3:4],dtype=torch.bool,device=lat.device)
+        if conditioning=='full_source':hm[:,0,:]=True
+        else:hm[:,0,0]=True
         expanded=hm[:,:,None,:,None,None].expand_as(lat);fixed=lat[expanded].clone()
         def check(module,args,kwargs):
             if torch.equal(kwargs['hist_mask'],hm):
@@ -337,7 +356,7 @@ def generate(*, condition, repository, config, checkpoint, checkpoint_receipt, o
         raw=((algo._views(pred,1)[0].float().clamp(-1,1)+1)*127.5).round().byte().permute(1,0,3,4,2).cpu().numpy()
     if raw.shape!=(len(rgb),4,160,320,3):
         raise ValueError('Unexpected decoded multiview RGB layout')
-    observations=raw.copy();observations[:,0]=rgb
+    observations=restore_observed_source(raw,rgb,known)
     if custom_text and (file_sha256(text_embeddings)!=custom_text['embedding_sha256']
                         or file_sha256(text_embedding_receipt)!=custom_text['receipt_sha256']):
         raise ValueError('Custom text evidence changed during generation')
@@ -347,6 +366,8 @@ def generate(*, condition, repository, config, checkpoint, checkpoint_receipt, o
     np.savez_compressed(output/'observations.npz',rgb=observations,K=k,c2w=c,timestamps=times,observed_mask=known,source_frame_indices=ids)
     manifest=json.loads((condition/'input-manifest.json').read_text())
     manifest['task_text_conditioning']=text_conditioning
+    manifest['conditioning_diagnostic']={'mode':conditioning,'observed_source_frames':int(known[:,0].sum()),
+        'strict_forecasting_claim':False,'camera_ancestry':'Original full-source initializer remains active'}
     for artifact in manifest['artifacts']:
         if 'path' in artifact:artifact['path']=str((condition/artifact['path']).resolve())
     manifest['artifacts'] += [
@@ -361,26 +382,28 @@ def generate(*, condition, repository, config, checkpoint, checkpoint_receipt, o
          'view_role':'helper','parent_ids':['generated_helper_rgb'],
          'path':'observations.npz','sha256':file_sha256(output/'observations.npz'),
          'time_range_s':[float(times[0]),float(times[-1])],
-         'mixed_origin_rule':'observed_mask is true for original source view0 only; remaining pixels generated'}]
+         'mixed_origin_rule':'Only observed_mask=true pixels are original RGB; all others remain generated, including source-view future in first-frame diagnostic mode'}]
     manifest['method_inputs'] += ['reconstruction_rgb']
     validate_manifest(manifest,output,verify_files=True)
     (output/'input-manifest.json').write_text(json.dumps(manifest,indent=2))
     fps=(len(times)-1)/(times[-1]-times[0])
     with imageio.get_writer(output/'source-and-generated.mp4',fps=fps,codec='libx264',quality=8) as writer:
         for row in observations:writer.append_data(np.concatenate(row,axis=1))
-    report=dict(status='complete',mode='observed-video reconstruction',seconds=time.monotonic()-start,
+    report=dict(status='complete',mode='observed-video reconstruction' if conditioning=='full_source' else 'first-frame conditioning diagnostic with full-clip camera ancestry',seconds=time.monotonic()-start,
                 checkpoint=str(checkpoint),checkpoint_sha256=proof['checkpoint_sha256'],driver_sha256=file_sha256(__file__),
                 preparation_sha256=file_sha256(condition/'preparation.json'),seed=seed,prompt_key=text_conditioning['prompt_key'],
                 text_conditioning=text_conditioning,
                 text_guidance=float(text_guidance),hist_guidance=float(hist_guidance),sampling_config_sha256=sampling_config_sha256,
                 conditioning_horizon=sampling_config['conditioning_horizon'],source_time_range_s=sampling_config['source_time_range_s'],
                 camera_design_horizon=sampling_config['camera_design_horizon'],
+                conditioning_mode=conditioning,observed_source_frames=int(known[:,0].sum()),
+                observed_source_time_range_s=sampling_config['observed_source_time_range_s'],strict_forecasting_claim=False,
                 source_frames=len(rgb),total_views=4,generated_views=3,observed_extra_views=0,
                 supplied_dataset_cameras=False,measured_depth_used=False,simulator_used=False,
                 source_clamp_max_error=final_error,conditional_forward_checks=len(checks),
                 generated_sha256=file_sha256(output/'generated.npz'),observations_sha256=file_sha256(output/'observations.npz'),
                 virtual_camera_scale_m=scale,peak_gpu_gb=torch.cuda.max_memory_allocated()/1e9,
-                source_pixels='Exact supplied RGB restored only in view0; raw decoded source retained in generated.npz',
+                source_pixels='Only declared observed source frames are restored; unobserved source-view future remains generated. Raw decoder output retained in generated.npz',
                 caveats=[prep['training_caveat'],'Generated camera consistency and object accuracy are unmeasured.'])
     (output/'generation.json').write_text(json.dumps(report,indent=2));print(json.dumps(report,indent=2),flush=True)
     return report
@@ -401,6 +424,8 @@ def main():
     g.add_argument('--null-text',action='store_true',help='Use null text context rather than a cached task prompt; requires text guidance zero')
     g.add_argument('--text-embeddings',type=Path,help='Author-format task/null embedding dictionary; requires a completed receipt')
     g.add_argument('--text-embedding-receipt',type=Path)
+    g.add_argument('--conditioning',choices=['full_source','first_frame_diagnostic'],default='full_source',
+                   help='First-frame diagnostic retains full-clip camera ancestry and is not a strict forecast experiment')
     args=vars(p.parse_args());command=args.pop('command')
     print(json.dumps({'prepare':prepare,'prepare-prefix':prepare_prefix,'generate':generate}[command](**args),indent=2))
 

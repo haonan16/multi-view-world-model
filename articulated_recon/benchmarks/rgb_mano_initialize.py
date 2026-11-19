@@ -197,6 +197,7 @@ def prepare(*,geometry,landmarks,masks,run,case,models,object_prompt,device='cud
     kp=np.concatenate([xy,np.repeat(visible[:,None,None],21,axis=1)],axis=-1)[:,None].astype(np.float32)
     np.savez_compressed(out/'human-evidence.npz',keypoints=kp,depth_valid=depth_valid,visible=visible)
     protocol=dict(case=case,mano_side=side,fps=float(1/np.median(np.diff(timestamps))),
+        coordinate_frame=dict(name='source_camera',handedness='right',up_axis='unknown',pose_convention='T_world_local'),
         table=dict(normal=normal.tolist(),offset=float(offset)),
         hand_initialization='Fresh RGB MediaPipe relative3D plus learned UniDepth wrist depth; both MANO sides tested using RGB reprojection',
         side_hypothesis_reprojection_px={s:h['selection_score'] for s,h in hypotheses.items()},

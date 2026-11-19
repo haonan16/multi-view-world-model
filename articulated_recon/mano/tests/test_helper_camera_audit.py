@@ -1,8 +1,9 @@
 from pathlib import Path
 import sys
 import numpy as np
+import pytest
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
-from benchmarks.helper_camera_audit import requested_pixels,compare_displacements,transform_grid
+from benchmarks.helper_camera_audit import requested_pixels,compare_displacements,transform_grid,dynamic_prompt_ids
 
 
 def test_identity_camera_preserves_pixels_and_baseline_moves_them():
@@ -35,3 +36,14 @@ def test_nonpositive_depth_is_excluded_from_camera_evidence():
     k=np.eye(3);pixels=np.ones((3,2));depth=np.array([1.,0.,np.nan])
     projected,valid=requested_pixels(pixels,depth,k,k,np.eye(4),np.eye(4))
     assert valid.tolist()==[True,False,False] and np.isnan(projected[1:]).all()
+
+
+def test_bottle_background_audit_explicitly_excludes_bottle_and_hand():
+    assert dynamic_prompt_ids(['pump bottle','hand','tabletop'],['pump bottle'])==[1,0]
+    assert dynamic_prompt_ids(['wooden block on patterned mat','hand','tabletop'])==[1,0]
+    with pytest.raises(ValueError,match='Object masks'):
+        dynamic_prompt_ids(['pump bottle','hand','tabletop'])
+    with pytest.raises(ValueError,match='must match'):
+        dynamic_prompt_ids(['pump bottle','hand','tabletop'],['bottle'])
+    with pytest.raises(ValueError,match='Hand masks'):
+        dynamic_prompt_ids(['pump bottle','tabletop'],['pump bottle'])

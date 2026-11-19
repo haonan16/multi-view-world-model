@@ -12,6 +12,17 @@ The fit runs in 3D against multiview depth and cameras. A pixels-only render-and
 backend, direct RobotFitter port, object/tracking stage wrappers and tests. It is
 packaged separately from the robot pipeline and uses prepared observations.
 
+**RGB-only human-video experiments:** [current protocol and measured results](benchmarks/README.md)
+separate learned depth/cameras from the calibrated results below. The human
+branch includes fresh RGB initialization, shared scene exports, fixed-deployment
+planning and a sealed independent-scene executor. Passing a geometry check does
+not establish execution success; the first four RGB-only block plans missed
+the reference object.
+
+Both fitters can export actor states through the [shared sequence format](benchmarks/README_urdf_export.md).
+The URDF hook preserves native results and requires explicit timing; this does
+not yet unify the two downstream object-fitting implementations.
+
 Test scenes:
 - ManiSkill PegInsertionSide ("standard").
 - ManiSkill drawer opening ("drawer").
