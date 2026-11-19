@@ -145,6 +145,22 @@ well as optimization. Good render agreement does not establish contact accuracy
 or execution success. The frozen-plan utilities reject post-freeze changes;
 evaluation scene feedback must not be used to refine those commands.
 
+The hand and full-pipeline runners now accept `--input-manifest` to validate the
+declared input lineage and hashes against their actual consumed files. They
+reject sensor/calibration dependencies under the strict RGB-only condition and
+do not relabel old unverified caches. Without a manifest a legacy run is
+explicitly unverified. These checks validate declarations and file identity;
+they do not prove a producer truthfully described its inputs.
+
+The shared scene state and new comparison tools are documented in
+[`../benchmarks/README_protocol.md`](../benchmarks/README_protocol.md).
+They separate strict RGB, calibrated RGB and RGB-D oracle conditions, and block
+execution when metric scale or robot-to-scene registration remains unresolved.
+Legacy action preparation can recenter a reconstructed scene, and its original
+executor can instantiate that reconstructed geometry. That is not an independent
+fixed-scene transfer test. Keep it labeled as a legacy diagnostic; sealing an
+output does not by itself turn that executor into the new evaluation protocol.
+
 ## Validation
 
 ```bash

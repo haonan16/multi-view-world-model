@@ -8,6 +8,7 @@ Amani's original state machine with MANO aperture/frame replacing Panda's.
 """
 import argparse
 import copy
+import hashlib
 import json
 import os
 import pickle
@@ -15,6 +16,7 @@ from pathlib import Path
 import sys
 import time
 from types import SimpleNamespace
+from mano_recon.run_integrity import artifact_record, verify_cached_outputs
 
 import numpy as np
 import torch
@@ -32,6 +34,7 @@ class AssistedMasks:
 def main():
     ap=argparse.ArgumentParser()
     ap.add_argument('--run',type=Path,required=True)
+    ap.add_argument('--input-manifest',type=Path,help='Validate source inputs and previously produced hand outputs')
     ap.add_argument('--case',choices=['button','block','bottle'],required=True)
     ap.add_argument('--arm',choices=['assisted','sam3','sam3d','sam3d_forced'],required=True)
     ap.add_argument('--grasp',choices=['legacy','upstream'],default='legacy')
@@ -48,7 +51,29 @@ def main():
     case=run/'inputs'/args.case
     protocol=json.loads((case/'protocol.json').read_text());ids=np.array(protocol['keyframe_ids'])
     ann=json.loads((case/'ann.json').read_text());ann=copy.deepcopy(ann)
+    sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
+    from artirecon.input_protocol import load_manifest, unverified_report, ProtocolError
+    from artirecon.scene_exports import fit_timestamps
+    input_protocol=unverified_report()
+    hand_path=case/'frozen-hand.npz'
+    if args.input_manifest:
+        if (case/'fit-calibration.npz').exists():
+            raise ProtocolError('Apply calibration in a declared preparation stage, not a hidden fit-calibration.npz')
+        required=[('depth',case/'obs.npz'),('cameras',case/'obs.npz'),
+                  ('support',case/'protocol.json'),('masks',case/'ann.json')]
+        required.append(('masks',run/'controls'/args.case/'assisted-masks.npz' if args.arm=='assisted' else case/'sam3.npz'))
+        if args.arm.startswith('sam3d'):
+            name=ann['objects'][0]['name']
+            required += [('object_geometry',case/'sam3d'/(name+'_20k.ply')),
+                         ('object_geometry',case/'sam3d'/(name+'.json'))]
+        input_protocol=load_manifest(args.input_manifest,required)
+        hand_audit=json.loads((run/'hand-results'/args.case/'execution.json').read_text())
+        if hand_audit.get('status')!='complete' or hand_audit.get('input_protocol',{}).get('manifest_sha256')!=input_protocol['manifest_sha256']:
+            raise ProtocolError('Derived hand fit lacks matching verified input provenance')
+        verify_cached_outputs(hand_audit,{'fit':run/'hand-results'/args.case/'fit.npz','frozen_hand':hand_path})
+    frozen_hand_record=artifact_record(hand_path)
     z=np.load(case/'obs.npz');D=z['depth_m'][ids]
+    all_timestamps,timestamp_source=fit_timestamps(z,len(z['depth_m']),protocol['fps'],require_supplied=bool(args.input_manifest))
     C=z['c2w']
     if (case/'fit-calibration.npz').exists():
         calibration=np.load(case/'fit-calibration.npz')
@@ -80,6 +105,10 @@ def main():
         mask_paths=[output/'sam3-keyframes.npz']
         if args.tracked:
             source=run/'results'/f'{args.arm}-{args.grasp}'/args.case
+            if args.input_manifest:
+                seed_audit=json.loads((source/'execution.json').read_text())
+                if seed_audit.get('input_protocol',{}).get('manifest_sha256')!=input_protocol['manifest_sha256'] or seed_audit.get('derived_inputs',{}).get('frozen_hand')!=frozen_hand_record:
+                    raise ProtocolError('Preliminary object fit has different/unverified source or frozen hand')
             assert json.loads((source/'sam3-track-execution.json').read_text())['status']=='complete'
             mask_paths.append(source/'sam3_track.npz')
         masks=Sam3Masks(mask_paths,*D.shape[-2:])
@@ -88,7 +117,7 @@ def main():
         ob.update(shape='mesh',mesh=str(case/'sam3d'/f"{ob['name']}_20k.ply"),mesh_json=str(case/'sam3d'/f"{ob['name']}.json"))
         assert Path(ob['mesh']).is_file() and Path(ob['mesh_json']).is_file()
     else:ob['shape']=ob['alt_shape']
-    h=np.load(case/'frozen-hand.npz')
+    h=np.load(hand_path)
     rob={k:h[k][ids] for k in ['q','base','hand_frames','pinch_points','pinch_width']}
     if 'visible' in h:rob['visible']=h['visible'][ids]
     class Hand:
@@ -123,19 +152,32 @@ def main():
     (output/'initial-candidates.json').write_text(json.dumps(initial_candidates))
     if len(fit)!=len(ann['objects']):raise RuntimeError('Missing object; refusing to mark successful')
     with open(output/'objects-fit.pkl','wb') as f:pickle.dump(fit,f)
+    hand_fit_path=run/'hand-results'/args.case/'fit.npz'
+    if not hand_fit_path.is_file():hand_fit_path=case/'frozen-hand.npz'
     scene=dict(schema='mano-scene-0.1',source='Amani ObjectsV2 MANO adaptation',
-               frame_ids=ids.tolist(),timestamps=(ids/protocol['fps']).tolist(),table=table,
-               hand_fit=protocol['hand_fit_sha256'],objects=[])
+               frame_ids=ids.tolist(),timestamps=all_timestamps[ids].tolist(),timestamp_source=timestamp_source,table=table,
+               hand_fit=hashlib.sha256(hand_fit_path.read_bytes()).hexdigest(),
+               hand_fit_hash_source=str(hand_fit_path.relative_to(run)),
+               frozen_hand_sha256=frozen_hand_record['sha256'],
+               frozen_hand_hash_source=str(hand_path.relative_to(run)),objects=[])
     for o in fit:
         scene['objects'].append(dict(name=o['name'],type=o['type'],vertices=o['mesh'][0].tolist(),faces=o['mesh'][1].tolist(),
                                      poses=o['poses'].tolist(),held=o['held'].tolist(),half_extents=o['half'].tolist(),loss=o['loss'].tolist(),
                                      selected_shape=o['selected_shape'],candidate_losses=o['candidate_losses']))
     (output/'scene.json').write_text(json.dumps(scene))
     (output/'fit.log').write_text('\n'.join(log))
+    if artifact_record(hand_path)!=frozen_hand_record:
+        raise ProtocolError('Frozen hand changed during object fitting; refusing completion')
+    derived_inputs={'frozen_hand':frozen_hand_record}
+    if args.tracked:
+        derived_inputs['tracked_masks']={**artifact_record(source/'sam3_track.npz'),
+            'origin':'pipeline_output','producer':'SAM3 tracker seeded by the preliminary object fit',
+            'observation_status':'estimated masks, not new observed RGB or GT masks'}
     (output/'execution.json').write_text(json.dumps(dict(status='complete',arm=args.arm,grasp=args.grasp,tracked=args.tracked,
              seconds=time.monotonic()-t0,device=args.device,fit_cameras=protocol['train_cameras'],
              heldout_camera=protocol['heldout_camera'],budgets=dict(surface_samples=1500,shape_iters=250,pose_iters=150),
-             annotation=ann,protocol=protocol),indent=2))
+             annotation=ann,protocol=protocol,input_protocol=input_protocol,derived_inputs=derived_inputs,
+             timestamp_source=timestamp_source),indent=2))
     print('Completed',output,flush=True)
 
 
