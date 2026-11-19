@@ -1,0 +1,274 @@
+--- upstream/geom.py
++++ adapted/geom.py
+@@ -13,7 +13,7 @@
+ """
+ import numpy as np
+ import torch
+-from pytorch3d.ops import knn_points
++from .knn import knn_points
+ 
+ 
+ def rho(x, s):
+@@ -24,7 +24,7 @@
+ class DepthViews:
+     """Depth maps of T frames x V views on the GPU. depth [T,V,H,W] metres (0 = empty)."""
+ 
+-    def __init__(self, depth, K, c2w, device="cuda"):
++    def __init__(self, depth, K, c2w, device="cpu"):
+         self.D = torch.as_tensor(np.ascontiguousarray(depth), dtype=torch.float32, device=device)
+         self.T, self.V, self.H, self.W = self.D.shape
+         self.K = torch.as_tensor(K, dtype=torch.float32, device=device)
+@@ -41,14 +41,14 @@
+         v = self.K[None, :, None, 1, 1] * Pc[..., 1] / zc + self.K[None, :, None, 1, 2]
+         return u, v, z
+ 
+-    def sample(self, u, v, frames):
++    def sample(self, u, v, frames, view_indices=None):
+         """nearest depth at (u,v) [B,V,N] for frames [B] -> D, inside"""
+         ui, vi = u.round().long(), v.round().long()
+         inside = (ui >= 0) & (ui < self.W) & (vi >= 0) & (vi < self.H)
+         ui, vi = ui.clamp(0, self.W - 1), vi.clamp(0, self.H - 1)
+         B, V, N = u.shape
+         f = torch.as_tensor(frames, device=u.device).view(B, 1, 1).expand(B, V, N)
+-        vv = torch.arange(V, device=u.device).view(1, V, 1).expand(B, V, N)
++        vv = (torch.arange(V, device=u.device) if view_indices is None else torch.as_tensor(view_indices, device=u.device)).view(1, V, 1).expand(B, V, N)
+         return self.D[f, vv, vi, ui], inside
+ 
+ 
+--- upstream/objects_v2.py
++++ adapted/objects_v2.py
+@@ -21,10 +21,11 @@
+ import numpy as np
+ import torch
+ import trimesh
+-from pytorch3d.ops import knn_points
++from .knn import knn_points
+ 
+ from .geom import DepthViews, depth_term, rho
+-from .scene_fit import hand_T, tcp_points
++from ..model import translation_base
++from scipy.spatial.transform import Rotation
+ 
+ 
+ # ------------------------------------------------------------------ SAM 3 instances
+@@ -86,8 +87,8 @@
+ def _knn_d(A, B):
+     if len(A) == 0 or len(B) == 0:
+         return np.full(len(A), np.inf)
+-    a = torch.as_tensor(A, dtype=torch.float32, device="cuda")[None]
+-    b = torch.as_tensor(B, dtype=torch.float32, device="cuda")[None]
++    a = torch.as_tensor(A, dtype=torch.float32, device="cpu")[None]
++    b = torch.as_tensor(B, dtype=torch.float32, device="cpu")[None]
+     return knn_points(a, b, K=1).dists[0, :, 0].sqrt().cpu().numpy()
+ 
+ 
+@@ -136,7 +137,7 @@
+     T, half = box_shape(P, n, d, base_h)
+     Pl = (P - T[:3, 3]) @ T[:3, :3]
+     hull = cv2.convexHull(Pl[:, :2].astype(np.float32))[:, 0]
+-    poly = trimesh.path.polygons.Polygon(hull)
++    poly = __import__('shapely.geometry',fromlist=['Polygon']).Polygon(hull)
+     m = trimesh.creation.extrude_polygon(poly, 2 * half[2])
+     m.apply_translation([0, 0, -half[2]])
+     return T, half, m
+@@ -169,13 +170,13 @@
+         self.sc_range = (np.log(0.55), np.log(1.5))
+         q, base = rob["q"], rob["base"]
+         with torch.no_grad():
+-            P, _ = robot.surface(torch.as_tensor(q, dtype=torch.float32, device="cuda"),
+-                                 torch.as_tensor(base, dtype=torch.float32, device="cuda")[None].expand(len(q), 4, 4)
+-                                 if np.ndim(base) == 2 else torch.as_tensor(base, dtype=torch.float32, device="cuda"))
++            P, _ = robot.surface(torch.as_tensor(q, dtype=torch.float32, device="cpu"),
++                                 torch.as_tensor(base, dtype=torch.float32, device="cpu")[None].expand(len(q), 4, 4)
++                                 if np.ndim(base) == 2 else torch.as_tensor(base, dtype=torch.float32, device="cpu"))
+         self.robot_pts = P.cpu().numpy()                                  # T,N,3
+-        self.Th = hand_T(robot, q, base)[0]                               # T,4,4 hand frame
+-        self.tcp = tcp_points(robot, q, base)                             # T,3 point between the finger tips
+-        self.width = np.asarray(q)[:, 7:9].sum(1) if np.asarray(q).shape[1] >= 9 else np.zeros(len(q))
++        self.Th = np.array(rob["hand_frames"])                               # T,4,4 hand frame
++        self.tcp = np.array(rob["pinch_points"])                             # T,3 point between the finger tips
++        self.width = np.array(rob["pinch_width"])
+         # masks as torch for the silhouette term: distance transform outside the selected instance (pixels)
+         self.H, self.W = obs.depth.shape[2:]
+ 
+@@ -233,7 +234,7 @@
+ 
+         allow_global = [True]
+         last_seen = [th]
+-        gpt = np.einsum("tij,j->ti", self.Th, np.array([0, 0, spec.get("finger_reach", 0.15), 1.0]))[:, :3]
++        gpt = np.einsum("tij,j->ti", self.Th, np.array([0, 0, spec.get("finger_reach", 0.0), 1.0]))[:, :3]
+ 
+         def pick(t, pred_list, g=None, min_views=1):
+             g = g or gate
+@@ -319,72 +320,27 @@
+         # point within 3 cm of the object's observed points) -> carried rigidly with the hand -> released
+         # (gripper opens 1.5 cm beyond its grasp width) -> rest.  'push' objects are never carried: they
+         # are predicted to follow the hand's motion in the table plane.
+-        w = self.width
+-        w_open = float(np.max(w))
+         static = spec.get("role") == "static"
+-        push = spec.get("mode") == "push"
+-        gpt = np.einsum("tij,j->ti", self.Th, np.array([0, 0, spec.get("finger_reach", 0.15), 1.0]))[:, :3]
+-        w_g = None
+-        last_pts = None
+-        for t in range(th, T):
+-            if t == th:
+-                chosen, c = pick(t, [c0]); c = c if c is not None else c0
+-                held[t] = False
+-                if chosen:            # reference size from all views (one view may see the object partially)
+-                    Pf = np.concatenate([x["P"] for x in chosen.values()])
+-                    ref_size = max(ref_size, float(np.quantile(np.linalg.norm(Pf - np.median(Pf, 0), axis=1), 0.9)))
+-            else:
+-                tp = t - 1
+-                if held[tp]:
+-                    Tm = self.Th[t] @ np.linalg.inv(self.Th[tp])
+-                    carried = Tm[:3, :3] @ cen[tp] + Tm[:3, 3]
+-                    preds = [carried, cen[tp]]
+-                    empty = w_g > 0.008 and w[t] < 0.002            # closed on nothing (not for thin grasps)
+-                    held[t] = not (w[t] > max(w_g + 0.025, w_open - 0.015) or empty)
+-                    allow_global[0] = False
+-                    chosen, c = pick(t, preds)
+-                    allow_global[0] = True
+-                    # evidence of release: the object stays where it was while the hand moves away
+-                    if held[t] and c is not None and len(chosen) >= 2 and np.linalg.norm(c - cen[tp]) < 0.02 and \
+-                            np.linalg.norm(c - carried) > 0.03 and np.linalg.norm(gpt[t] - c) > 0.05 and \
+-                            all(np.linalg.norm(x["c"] - cen[tp]) < 0.03 for x in chosen.values()):
+-                        held[t] = False
+-                    if c is None or (held[t] and np.linalg.norm(c - carried) > 0.03):
+-                        c = carried if held[t] else (c if c is not None else cen[tp])
+-                else:
+-                    preds = [cen[tp]]
+-                    if push:
+-                        dlt = gpt[t] - gpt[tp]; dlt -= (dlt @ self.n) * self.n
+-                        preds.append(cen[tp] + dlt)
+-                    near = last_pts is not None and len(last_pts) and \
+-                        np.min(np.linalg.norm(last_pts - gpt[t], axis=1)) < spec.get("hold_dist", 0.035 + 0.4 * ref_size)
+-                    closing = np.max(w[max(0, t - 3):t + 1]) > w[t] + 0.015     # it closed by >= 1.5 cm over the last frames
+-                    held[t] = (not static) and (not push) and w[t] < w_open - 0.004 and w[t] > 0.0005 \
+-                        and w[t] <= w[tp] + 0.003 and closing and near
+-                    Tm = self.Th[t] @ np.linalg.inv(self.Th[tp])
+-                    carried = Tm[:3, :3] @ cen[tp] + Tm[:3, 3]
+-                    reach = near and w[t] < w_open - 0.004 and not static and not push
+-                    if reach and not held[t] and np.linalg.norm(carried - cen[tp]) > 0.03:
+-                        preds.append(carried)
+-                    chosen, c = pick(t, preds)
+-                    # motion evidence (thin grasps the width cannot show): the gripper is closed at the object and
+-                    # its detections moved with the hand instead of staying
+-                    if reach and not held[t] and c is not None and len(chosen) >= 2 and \
+-                            np.linalg.norm(c - carried) < 0.03 and np.linalg.norm(c - cen[tp]) > 0.03:
+-                        held[t] = True
+-                    if held[t]:
+-                        w_g = max(w[t], 0.001)
+-                    if c is None:
+-                        c = preds[0]
+-            sel[t], cen[t] = chosen, c
+-            if chosen and any(len(x["P"]) for x in chosen.values()):
+-                last_seen[0] = t
+-                last_pts = np.concatenate([x["P"] for x in chosen.values()])[::5]
+-            elif last_pts is not None and t > th:
+-                last_pts = last_pts + (cen[t] - cen[t - 1])
+-        for t in range(th - 1, -1, -1):        # before the hint frame: assume at rest
+-            chosen, c = pick(t, [cen[t + 1]])
+-            sel[t], cen[t] = chosen, (c if c is not None else cen[t + 1])
++        # Initial tracking is observation-driven; no invented human grasp event.
++        for t in range(th,T):
++            prev=c0 if t==th else cen[t-1]
++            preds=[prev]
++            if t>th:
++                preds.append(prev+self.tcp[t]-self.tcp[t-1])
++            chosen,c=pick(t,preds)
++            if c is None:chosen,c=pick(t,preds,g=3*gate,min_views=2)
++            sel[t],cen[t]=chosen,(prev if c is None else c)
++        for t in range(th-1,-1,-1):
++            chosen,c=pick(t,[cen[t+1]]);sel[t],cen[t]=chosen,(cen[t+1] if c is None else c)
++        # A hand-object attachment needs two observed views, measured motion,
++        # proximity, and similar displacements. Thresholds are experimental.
++        if not static:
++            for t in range(1,T):
++                if len(sel[t])<2 or len(sel[t-1])<2:continue
++                pts=np.concatenate([x["P"] for x in sel[t].values()])
++                near=len(pts)>0 and np.min(np.linalg.norm(pts-self.tcp[t],axis=1))<.04
++                delta=cen[t]-cen[t-1];hand_delta=self.tcp[t]-self.tcp[t-1]
++                held[t]=near and np.linalg.norm(delta)>.003 and np.linalg.norm(delta-hand_delta)<.02
+         return sel, np.array(cen), held
+ 
+     def support_h(self, t, insts):
+@@ -407,7 +363,7 @@
+         # density filter: keep points with >= 8 neighbours within 6 mm (removes flying pixels)
+         if len(P) > 50:
+             sub = P[np.random.default_rng(0).permutation(len(P))[:4000]]
+-            D2 = torch.cdist(torch.as_tensor(sub, device="cuda").float(), torch.as_tensor(sub, device="cuda").float())
++            D2 = torch.cdist(torch.as_tensor(sub, device="cpu").float(), torch.as_tensor(sub, device="cpu").float())
+             dens = (D2 < 0.006).sum(1).cpu().numpy()
+             P = sub[dens >= 8] if (dens >= 8).sum() > 30 else sub
+         kind = spec.get("shape", "box")
+@@ -458,14 +414,14 @@
+         return T0, half, m, rest
+ 
+     # -------------------------------------------------------------- pose fit
+-    def fit_pose(self, t, T_init_list, Ps, Nm, sel_t, held_t, T_hold=None, iters=150, opt_scale=False,
++    def fit_pose(self, t, T_init_list, Ps, Nm, sel_t, held_t, T_hold=None, iters=60, opt_scale=False,
+                  extra=(), w_sil=1.0, w_depth=None):
+         """6-DoF (+ optional per-axis scale) fit at frame t (and `extra` frames [(t, sel)] with the same pose).
+         Silhouettes are the main signal (SAM 3 masks are sharper than the depth at object edges):
+           out-of-mask: projected model points that are not occluded must fall inside the instance mask
+           coverage   : the instance mask must be covered by the projected model (2D chamfer)
+         plus robust 3D chamfer to the fused mask points and the multiview depth z-test (weaker)."""
+-        dev = "cuda"
++        dev = "cpu"
+         w_depth = getattr(self, "w_depth_obj", 0.3) if w_depth is None else w_depth
+         frames = [(t, sel_t)] + list(extra)
+         self.cur_support = self.support_h(t, sel_t) if sel_t else 0.0
+@@ -478,7 +434,7 @@
+         rng = np.random.default_rng(0)
+         obsP = [np.concatenate([c["P"] for c in st.values()]) for _, st in frames if st]
+         obsP = np.concatenate(obsP) if obsP else np.zeros((0, 3))
+-        F = torch.as_tensor(obsP[rng.permutation(len(obsP))[:3000]], dtype=torch.float32, device=dev)
++        F = torch.as_tensor(obsP[rng.permutation(len(obsP))[:1000]], dtype=torch.float32, device=dev)
+         Pm = torch.as_tensor(Ps, dtype=torch.float32, device=dev)
+         Nm_ = torch.as_tensor(Nm, dtype=torch.float32, device=dev)
+         n = torch.as_tensor(self.n, dtype=torch.float32, device=dev)
+@@ -488,7 +444,7 @@
+                 m = c["m"]
+                 dt = torch.as_tensor(cv2.distanceTransform((~m).astype(np.uint8), cv2.DIST_L2, 3), dtype=torch.float32, device=dev)
+                 ys, xs = np.nonzero(m)
+-                k = rng.permutation(len(xs))[:300]
++                k = rng.permutation(len(xs))[:150]
+                 sil.append((tf, v, dt, torch.as_tensor(np.stack([xs[k], ys[k]], 1), dtype=torch.float32, device=dev)))
+         T0 = torch.as_tensor(np.stack(T_init_list), dtype=torch.float32, device=dev)          # B,4,4
+         B = len(T0)
+@@ -521,7 +477,7 @@
+                     g = torch.stack([ui.clamp(0, self.W - 1) / (self.W - 1) * 2 - 1,
+                                      vi.clamp(0, self.H - 1) / (self.H - 1) * 2 - 1], -1)[:, None]
+                     dpx = torch.nn.functional.grid_sample(dt[None, None].expand(B, 1, -1, -1), g, align_corners=True)[:, 0, 0]
+-                    D, _ = self.views.sample(u[:, v:v + 1], vv[:, v:v + 1], [tf] * B)
++                    D, _ = self.views.sample(u[:, v:v + 1], vv[:, v:v + 1], [tf] * B, view_indices=[v])
+                     occl = (D[:, 0] > 0) & (D[:, 0] < z[:, v] - 0.015)          # something in front of the model
+                     wv = (inside & ~occl).float()
+                     out = (rho(dpx / 4.0, 1.0) * wv).sum(1) / wv.sum(1).clamp(min=1)
+@@ -597,14 +553,14 @@
+             best = None
+             for sv in variants:
+                 T0, half, mesh, rest = self.shape(sv, sel, cen, held)
+-                Ps, Nm = mesh_samples(mesh, 1500)
++                Ps, Nm = mesh_samples(mesh, 500)
+                 Ps = Ps.astype(np.float32); Nm = Nm.astype(np.float32)
+                 t_first = rest[0]
+                 init = [T0 @ yaw(a) for a in (0, np.pi / 2)] if sv.get("shape", "box") in ("box", "container") else \
+                     [T0 @ yaw(a) for a in (0, np.pi / 2, np.pi, -np.pi / 2)] if sv.get("shape") == "hull" else [T0]
+                 extra = [(tt, sel[tt]) for tt in rest[1:] if sel[tt]][:: max(1, len(rest) // 3)][:3]
+                 self.rec_stage = f"shape+pose [{sv.get('shape', 'box')}]"
+-                Tf, _ = self.fit_pose(t_first, init, Ps, Nm, sel[t_first], held[t_first], iters=250, opt_scale=True,
++                Tf, _ = self.fit_pose(t_first, init, Ps, Nm, sel[t_first], held[t_first], iters=100, opt_scale=True,
+                                       extra=extra)
+                 sc = self.last_scale
+                 if sv.get("shape", "box") == "sphere":
+@@ -612,7 +568,7 @@
+                 half = np.asarray(half) * sc
+                 if sv.get("shape") == "container":
+                     mesh = container_mesh(half)
+-                    Ps, Nm = mesh_samples(mesh, 1500); Ps = Ps.astype(np.float32); Nm = Nm.astype(np.float32)
++                    Ps, Nm = mesh_samples(mesh, 500); Ps = Ps.astype(np.float32); Nm = Nm.astype(np.float32)
+                 else:
+                     mesh = mesh.copy(); mesh.vertices = np.asarray(mesh.vertices) * sc
+                     Ps = (Ps * sc).astype(np.float32)

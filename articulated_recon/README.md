@@ -8,6 +8,10 @@ Given a manipulation video, recover the parts that move as an explicit, simulato
 
 The fit runs in 3D against multiview depth and cameras. A pixels-only render-and-compare version is kept as an ablation. The output (`scene.json`) loads into SAPIEN, so it can be used for replay, physics checks or inverse dynamics.
 
+**Human hands:** [MANO adaptation and setup](mano/README.md) contains the human-hand
+backend, direct RobotFitter port, object/tracking stage wrappers and tests. It is
+packaged separately from the robot pipeline and uses prepared observations.
+
 Test scenes:
 - ManiSkill PegInsertionSide ("standard").
 - ManiSkill drawer opening ("drawer").

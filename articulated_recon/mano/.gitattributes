@@ -1,0 +1,2 @@
+# Preserve the leading context space on empty lines in the historical patch.
+mano_recon/amani_objects/adaptation.diff whitespace=-blank-at-eol

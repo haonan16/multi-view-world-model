@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mano-reconstruction"
+version = "0.2.0"
+description = "MANO hand adapter and sequence reconstruction tools for articulated_recon"
+requires-python = ">=3.11"
+dependencies = [
+  "numpy>=1.26,<3",
+  "torch>=2.7,<3",
+  "smplx==0.1.28",
+  "scipy>=1.12,<2",
+  "pillow>=10",
+  "trimesh>=4,<6",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "opencv-python>=4.8", "imageio-ffmpeg>=0.5"]
+observations = ["opencv-python>=4.8", "mediapipe", "huggingface-hub", "imageio-ffmpeg>=0.5"]
+simulation = ["mani-skill", "imageio[ffmpeg]"]
+model-preparation = ["chumpy==0.70"]
+
+[tool.setuptools.packages.find]
+include = ["mano_recon*"]
+
+[tool.setuptools.package-data]
+mano_recon = ["*.cpp"]
+"mano_recon.amani_objects" = ["adaptation.diff"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
