@@ -62,12 +62,12 @@ def build(run):
                             '300-iteration all-frame refinement', 'original depth and robust Chamfer',
                             'Adam and cosine learning-rate schedule'],
                  adaptations=['MANO surface and free wrist instead of URDF FK and fixed base',
-                              'RGB triangulation supplies each-frame initialization; never previous RGB-D fit',
+                              'declared per-frame hand initialization supplies seeds; never implicitly reuse previous RGB-D fit',
                               'PCA coefficient bounds replace robot limits; no tied fingers',
                               'translation-specific step/noise scale in metres',
                               'one shared MANO shape optimized in joint refinement',
                               'no Panda base/yaw gauge search; no robot-proprioception camera ICP',
-                              'publisher camera calibration fixed; depth self-calibration disabled for comparison'])
+                              'declared input cameras fixed unless explicit depth self-calibration is enabled; protocol identifies predicted versus known calibration'])
     (dest.parent / 'robotfitter-mano-provenance.json').write_text(json.dumps(audit, indent=2))
     print(dest)
 

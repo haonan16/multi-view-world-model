@@ -89,7 +89,18 @@ def validate_geometry(data):
     rank = np.asarray(data["confidence_rank"])
     if not np.isfinite(rank).all() or np.any((rank < 0) | (rank > 1)):
         raise InitializationError("confidence_rank must contain finite [0,1] ranks, not probabilities")
+    confidence_available(data)
     return depth[:, 0], intrinsics[0], timestamps
+
+
+def confidence_available(data):
+    """Older UniDepth archives contain ranks; explicit absence stays absence."""
+    if "confidence_available" not in data:
+        return True
+    flag = np.asarray(data["confidence_available"])
+    if flag.shape != () or flag.dtype.kind != "b":
+        raise InitializationError("confidence_available must be a scalar boolean")
+    return bool(flag)
 
 
 class MaskCandidates:
@@ -227,6 +238,9 @@ def initialize(data, masks, config):
     """Return shared scene + diagnostics; caller provides model-only provenance."""
     validate_config(config)
     depth, intrinsics, timestamps = validate_geometry(data)
+    ranked = confidence_available(data)
+    if config["confidence_mode"] == "rank50" and not ranked:
+        raise InitializationError("rank50 requires model confidence; neutral weights are not confidence")
     candidates = MaskCandidates(masks, len(depth), depth.shape[-2:], timestamps)
     selected, association = associate_masks(candidates, len(depth), config)
     if selected[0] is None:
@@ -352,14 +366,15 @@ def initialize(data, masks, config):
     scene["orientation_estimated_over_time"] = False
     scene["initial_support_prior"] = {"used": True, "frame": 0, "source": "Task-supplied RGB support hypothesis",
                                       "per_frame_support_corrections_applied": False}
-    diagnostics = dict(status="initialized", confidence_mode=config["confidence_mode"], frames=len(depth),
+    diagnostics = dict(status="initialized", confidence_mode=config["confidence_mode"], confidence_available=ranked, frames=len(depth),
                        observed_frames=int(observed.sum()), unobserved_frames=np.flatnonzero(~observed).tolist(),
                        association=association, evidence=evidence, table=table_report,
                        dimensions_m=extents.tolist(), initial_pose=poses[0].tolist(), config=config,
                        contact_intervals=contacts, scene_initialization_only=True, SAM3D_used=False,
                        full_orientation_tracking=False, measured_depth_used=False, supplied_calibration_used=False,
                        simulator_accessed=False, camera_z_convention="z-depth along predicted source pinhole rays",
-                       confidence_interpretation="Global within-frame inverse uncertainty rank; rank50 keeps rank>=0.5, not a probability",
+                       confidence_interpretation=("Global within-frame inverse uncertainty rank; rank50 keeps rank>=0.5, not a probability"
+                                                  if ranked else "Unavailable: all valid points retained without confidence weighting"),
                        limitations=["A cuboid from visible first-frame surfaces cannot establish hidden shape accuracy.",
                                     "Initial support is a declared RGB-based hypothesis, not a measured object bottom.",
                                     "Camera is assumed static; source camera identity is a gauge, not robot registration.",

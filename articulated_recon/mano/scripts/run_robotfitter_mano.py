@@ -12,6 +12,7 @@ import torch
 from scipy.spatial.transform import Rotation
 from mano_recon.model import translation_base
 from mano_recon.run_integrity import output_records, verify_cached_outputs
+from mano_recon.robotfitter_adapter import declared_mano_side
 
 
 def main():
@@ -56,6 +57,7 @@ def main():
             if not a.input_manifest:print('Input provenance unverified for existing legacy fit',a.case,flush=True)
             print('Existing complete hand fit',a.case,flush=True);return
     z=np.load(case/'obs.npz');h=np.load(case/'hand-input.npz');meta=json.loads((case/'protocol.json').read_text())
+    mano_side=declared_mano_side(meta,require_explicit=bool(a.input_manifest))
     T=a.limit_frames or len(z['depth_m']);D=z['depth_m'][:T]
     timestamps,timestamp_method=fit_timestamps(z,T,meta.get('fps'),require_supplied=bool(a.input_manifest))
     obs=SimpleNamespace(depth=D,K=z['K'],c2w=z['c2w'],T=T,V=D.shape[1])
@@ -79,7 +81,7 @@ def main():
     e1=np.cross(n,[0.,0.,1.]) if abs(n[2])<.9 else np.cross(n,[1.,0.,0.]);e1/=np.linalg.norm(e1)
     prep=dict(n=n,d=d,e1=e1,e2=np.cross(n,e1),origin=-d*n,
               fg=fg,fg_view=fv)
-    robot=MANORobot(str(a.models or run/'assets/mano'),h['initial_q'][:T],h['initial_translation'][:T],device=a.device)
+    robot=MANORobot(str(a.models or run/'assets/mano'),h['initial_q'][:T],h['initial_translation'][:T],device=a.device,side=mano_side)
     fitter=RobotFitter(obs,prep,robot=robot,device=a.device,known_base=np.eye(4),log=log,calib=a.calibrate)
     human_evidence=(run/'enable-human-evidence.json').exists()
     visible=np.ones(T,bool)
@@ -150,6 +152,7 @@ def main():
                shared_shape=beta.cpu().numpy().tolist(),depth_self_calibration=a.calibrate,
                human_evidence_constraints=human_evidence,proprioception_camera_ICP=False,provenance='runtime/amani_comparison/robotfitter-mano-provenance.json')
     audit.update(finger_pair_hypotheses=a.finger_hypotheses,refinement_source=str(a.refine_from.resolve()) if a.refine_from else None)
+    audit.update(mano_side=mano_side,mano_side_source='explicit protocol' if 'mano_side' in meta else 'legacy right-only default')
     if a.refine_from:audit.update(forward_starts=0,initial_starts=0,backward_starts=0,previous_RGBD_fit_used=True,refinement_source_sha256=hashlib.sha256(a.refine_from.read_bytes()).hexdigest())
     audit['static_camera_refinement']=(case/'static-calibration.json').exists()
     audit['input_protocol']=input_protocol

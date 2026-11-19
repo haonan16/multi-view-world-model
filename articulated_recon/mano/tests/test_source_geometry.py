@@ -54,6 +54,17 @@ def config(mode="all"):
     return dict(initializer.default_config(), confidence_mode=mode, table_ransac_iterations=50)
 
 
+def test_missing_confidence_accepts_all_points_and_rejects_rank_filtering():
+    geometry, masks = inputs()
+    geometry["confidence_available"] = np.asarray(False)
+    geometry["confidence_rank"][:] = 1.  # Neutral storage weights, not certainty.
+    _, report = initializer.initialize(geometry, masks, config())
+    assert report["confidence_available"] is False
+    assert "Unavailable" in report["confidence_interpretation"]
+    with pytest.raises(initializer.InitializationError, match="neutral weights are not confidence"):
+        initializer.initialize(geometry, masks, config("rank50"))
+
+
 def test_first_shape_is_shared_and_translation_only_is_explicit():
     geometry, masks = inputs()
     scene, report = initializer.initialize(geometry, masks, config())

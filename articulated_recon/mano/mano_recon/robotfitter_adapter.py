@@ -21,9 +21,20 @@ def axis_angle(axis, angle):
     return torch.eye(3, device=axis.device)[None] + angle.sin()[:, None, None]*K + (1-angle.cos())[:, None, None]*(K@K)
 
 
+def declared_mano_side(protocol, require_explicit=False):
+    side=protocol.get('mano_side')
+    if side is None:
+        if require_explicit:
+            raise ValueError('Verified hand fitting requires an explicit mano_side declaration')
+        return 'right'  # Compatibility with earlier right-only experiments.
+    if side not in {'left','right'}:
+        raise ValueError('mano_side must be left or right')
+    return side
+
+
 class MANORobot:
-    def __init__(self, model_dir, initial_q, initial_translation, device='cuda', samples=768):
-        self.hand = MANOHand(model_dir, components=initial_q.shape[1]-3, samples=samples, device=device)
+    def __init__(self, model_dir, initial_q, initial_translation, device='cuda', samples=768, side='right'):
+        self.hand = MANOHand(model_dir, side=side, components=initial_q.shape[1]-3, samples=samples, device=device)
         self.initial = torch.tensor(np.concatenate([initial_q, initial_translation], -1), dtype=torch.float32, device=device)
         self.dof = self.initial.shape[1]
         self.betas = torch.nn.Parameter(torch.zeros(1, 10, device=device), requires_grad=False)

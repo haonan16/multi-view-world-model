@@ -149,8 +149,107 @@ def prepare(*, geometry_bundle, scene_path, scene_manifest, output, frames=25):
     return meta
 
 
+def prepare_prefix(*, condition, output, frames=17):
+    """Shorten source conditioning only; preserve the predeclared camera design."""
+    condition, output = Path(condition).resolve(), Path(output).resolve()
+    if output.exists(): raise FileExistsError(output)
+    load_manifest(condition/'input-manifest.json',[('cameras',condition/'condition.npz')])
+    prep=json.loads((condition/'preparation.json').read_text())
+    if prep['mode']!='reconstruction' or prep.get('conditioning_artifact_id','virtual_camera_requests')!='virtual_camera_requests':
+        raise ValueError('Prefix requires an original full-video reconstruction condition')
+    if file_sha256(condition/'condition.npz')!=prep['condition_sha256']:
+        raise ValueError('Original condition changed')
+    with np.load(condition/'condition.npz',allow_pickle=False) as z:
+        arrays={name:z[name].copy() for name in ['rgb','K','c2w','timestamps','source_frame_indices']}
+    original_times=arrays['timestamps'].copy()
+    if type(frames) is not int or frames<5 or (frames-1)%4 or frames>=len(original_times):
+        raise ValueError('Use a shorter existing 4k+1 prefix of at least five frames')
+    for name in ['rgb','timestamps','source_frame_indices']: arrays[name]=arrays[name][:frames]
+    output.mkdir(parents=True)
+    np.savez_compressed(output/'condition.npz',**arrays)
+    manifest=json.loads((condition/'input-manifest.json').read_text())
+    for artifact in manifest['artifacts']:
+        if 'path' in artifact: artifact['path']=str((condition/artifact['path']).resolve())
+    manifest['artifacts'].append({'id':'prefix_camera_requests','kind':'cameras','origin':'model_prediction',
+        'parent_ids':['virtual_camera_requests'],'path':'condition.npz','sha256':file_sha256(output/'condition.npz'),
+        'assumption':'Same predeclared full-clip camera requests; only source conditioning time prefix is shortened'})
+    manifest['method_inputs'].append('prefix_camera_requests')
+    validate_manifest(manifest,output,verify_files=True)
+    (output/'input-manifest.json').write_text(json.dumps(manifest,indent=2))
+    prep.update(observed_source_frames=frames,condition_sha256=file_sha256(output/'condition.npz'),
+        conditioning_artifact_id='prefix_camera_requests',source_timestamps=arrays['timestamps'].tolist(),
+        original_condition=str(condition),original_condition_sha256=file_sha256(condition/'condition.npz'),
+        conditioning_horizon='Prefix of the original sampled source sequence; not a full-clip endpoint comparison',
+        original_source_time_range_s=[float(original_times[0]),float(original_times[-1])],
+        conditioned_source_time_range_s=[float(arrays['timestamps'][0]),float(arrays['timestamps'][-1])],
+        camera_design_horizon='Unchanged full-clip source-derived initializer; camera design may consume later source frames',
+        training_caveat='17-frame prefix matches training frame count when frames=17, but source-only full-video history still omits target-view first-frame anchors used by training view_history')
+    (output/'preparation.json').write_text(json.dumps(prep,indent=2))
+    return prep
+
+
+def checked_guidance(text_guidance, hist_guidance, sample_steps):
+    for value in [text_guidance,hist_guidance]:
+        if not isinstance(value,(int,float)) or not np.isfinite(value) or not 0<=value<=5:
+            raise ValueError('Guidance must be a finite declared value between zero and five')
+    # The no-history branch has an all-false mask and is excluded from source-clamp checks.
+    return int(sample_steps)*(1+int(bool(text_guidance)))
+
+
+def validate_text_embeddings(path, receipt_path, prompt_key):
+    """Accept the author's cached-embedding format only with a completed receipt."""
+    import torch
+    path,receipt_path=Path(path).resolve(),Path(receipt_path).resolve()
+    receipt=json.loads(receipt_path.read_text())
+    if receipt.get('status')!='complete' or receipt.get('key')!=prompt_key:
+        raise ValueError('Custom text embedding needs a completed matching-key receipt')
+    if receipt.get('embedding_sha256')!=file_sha256(path):
+        raise ValueError('Custom text embedding differs from its receipt')
+    for key in ['encoder_sha256','encoder_source_sha256','tokenizer_source_sha256','tokenizer_config_sha256']:
+        value=receipt.get(key)
+        if not isinstance(value,str) or len(value)!=64 or any(c not in '0123456789abcdef' for c in value):
+            raise ValueError('Custom text receipt must bind the author encoder/tokenizer implementation')
+    data=torch.load(path,map_location='cpu',weights_only=True)
+    if not isinstance(data,dict) or set(data)!={prompt_key,''}:
+        raise ValueError('Custom embedding dictionary must contain the requested task and null context')
+    for key,text in [(prompt_key,receipt.get('text')),('','')]:
+        row=data[key]
+        if not isinstance(row,dict):raise ValueError('Custom embedding entry must contain text and embed')
+        tensor=row.get('embed')
+        if (not isinstance(text,str) or (key and not text.strip()) or row.get('text')!=text
+                or not isinstance(tensor,torch.Tensor) or tensor.ndim!=2 or not 1<=tensor.shape[0]<=512
+                or tensor.shape[1]!=4096 or not tensor.is_floating_point() or not bool(torch.isfinite(tensor).all())):
+            raise ValueError('Custom text embedding must have matching text and finite [L,4096] tensors')
+        schema=receipt.get('schema',{}).get(key,{})
+        if schema.get('text')!=text or schema.get('shape')!=list(tensor.shape):
+            raise ValueError('Embedding text/tensor shape differs from the author encoding receipt')
+        if receipt.get('dtype')!=str(tensor.dtype).removeprefix('torch.'):
+            raise ValueError('Embedding dtype differs from the author encoding receipt')
+    return {'mode':'custom_task_prompt','prompt_key':prompt_key,'task_text_used':True,'text':receipt['text'],
+        'embedding_path':str(path),'embedding_sha256':file_sha256(path),'receipt_path':str(receipt_path),
+        'receipt_sha256':file_sha256(receipt_path),'encoder_sha256':receipt['encoder_sha256'],
+        'encoder_source_sha256':receipt['encoder_source_sha256'],'tokenizer_source_sha256':receipt['tokenizer_source_sha256'],
+        'tokenizer_config_sha256':receipt['tokenizer_config_sha256'],
+        'interpretation':'Explicit task instruction encoded with the cached author UMT5; no observed 3D geometry'}
+
+
+def configure_text_conditioning(algo, prompt_key, *, null_text, text_guidance, custom=None):
+    """Guidance zero still uses task text unless null context is explicit."""
+    if null_text:
+        if text_guidance!=0:
+            raise ValueError('Explicit null text requires --text-guidance 0')
+        algo.use_text=False
+        return {'mode':'null_context','prompt_key':None,'task_text_used':False}
+    if prompt_key not in algo.text_embeds:
+        raise ValueError('Unknown fixed task prompt; use an appropriate cached prompt or explicit null text')
+    algo.use_text=True
+    if custom is not None:return custom
+    return {'mode':'cached_task_prompt','prompt_key':prompt_key,'task_text_used':True}
+
+
 def generate(*, condition, repository, config, checkpoint, checkpoint_receipt, output,
-             prompt_key='task_0004', seed=20261119):
+             prompt_key='task_0004', seed=20261119, text_guidance=2., hist_guidance=1., null_text=False,
+             text_embeddings=None,text_embedding_receipt=None):
     """Run the unchanged author sampler, verifying source-latent clamping."""
     import torch
     import imageio.v2 as imageio
@@ -179,17 +278,39 @@ def generate(*, condition, repository, config, checkpoint, checkpoint_receipt, o
         rgb,k,c,times,ids=[z[n].copy() for n in ['rgb','K','c2w','timestamps','source_frame_indices']]
     tensor,known=source_tensor(rgb)
     cfg=OmegaConf.load(config)
+    expected_conditioned_calls=checked_guidance(text_guidance,hist_guidance,cfg.algorithm.sample_steps)
+    if null_text and text_guidance!=0: raise ValueError('Explicit null text requires --text-guidance 0')
+    if bool(text_embeddings)!=bool(text_embedding_receipt) or (null_text and text_embeddings):
+        raise ValueError('Custom task embeddings require both file and receipt, and cannot be combined with null text')
+    custom_text=validate_text_embeddings(text_embeddings,text_embedding_receipt,prompt_key) if text_embeddings else None
+    if custom_text:
+        cfg.algorithm.text.enabled=True
+        cfg.algorithm.text.embeds_path=str(Path(text_embeddings).resolve())
     if cfg.algorithm.design!='tokens' or (cfg.dataset.height,cfg.dataset.width)!=(160,320):
         raise ValueError('This driver requires the reviewed tokens design and320x160 model')
     cfg.algorithm.model.tuned_ckpt_path=None;cfg.algorithm.gradient_checkpointing_rate=0.
-    output.mkdir(parents=True);start=time.monotonic()
+    output.mkdir(parents=True)
+    sampling_config=dict(schema='source-only-sampling-config-v1',text_guidance=float(text_guidance),hist_guidance=float(hist_guidance),
+        seed=seed,prompt_key=None if null_text else prompt_key,text_conditioning='null_context' if null_text else 'cached_task_prompt',sample_steps=int(cfg.algorithm.sample_steps),
+        author_validation_text_guidance=float(cfg.algorithm.get('val_text_guidance',0.)),
+        author_validation_hist_guidance=float(cfg.algorithm.get('val_hist_guidance',0.)),
+        model_config_sha256=file_sha256(config),checkpoint_sha256=proof['checkpoint_sha256'],
+        driver_sha256=file_sha256(__file__),condition_sha256=file_sha256(condition/'condition.npz'),
+        preparation_sha256=file_sha256(condition/'preparation.json'),conditioning_frames=len(rgb),
+        source_time_range_s=[float(times[0]),float(times[-1])],target_view_observed_anchors=0,
+        extra_observed_views=0,camera_design_horizon=prep.get('camera_design_horizon','Full source-clip initializer'),
+        conditioning_horizon=prep.get('conditioning_horizon','Full sampled source clip'),custom_text_conditioning=custom_text)
+    if custom_text:sampling_config['text_conditioning']='custom_task_prompt'
+    (output/'sampling-config.json').write_text(json.dumps(sampling_config,indent=2))
+    sampling_config_sha256=file_sha256(output/'sampling-config.json')
+    start=time.monotonic()
     algo=WanMultiView(cfg.algorithm);algo.configure_model()
     weights=torch.load(checkpoint,map_location='cpu',mmap=True,weights_only=False)
     if int(weights['global_step'])!=10000:raise ValueError('Unexpected author checkpoint step')
     state={n[6:]:v for n,v in weights['state_dict'].items() if n.startswith('model.')}
     algo.model.load_state_dict(state,strict=True);del weights,state
     algo=algo.to(dtype=torch.bfloat16).to('cuda').eval()
-    if prompt_key not in algo.text_embeds:raise ValueError('Unknown fixed task prompt')
+    text_conditioning=configure_text_conditioning(algo,prompt_key,null_text=null_text,text_guidance=text_guidance,custom=custom_text)
     K=torch.tensor(k,dtype=torch.float32);C=torch.tensor(c,dtype=torch.float32)
     scale=float(C[1:,:3,3].norm(dim=-1).mean());C[:,:3,3]/=scale
     kr=K.clone();kr[:,0]*=40/320;kr[:,1]*=20/160
@@ -209,17 +330,23 @@ def generate(*, condition, repository, config, checkpoint, checkpoint_receipt, o
                 checks.append(err)
         hook=algo.model.register_forward_pre_hook(check,with_kwargs=True)
         torch.manual_seed(seed)
-        try:pred=algo.sample(lat,cond,batch=batch,hist_mask=hm,text_guidance=2.,hist_guidance=1.)
+        try:pred=algo.sample(lat,cond,batch=batch,hist_mask=hm,text_guidance=text_guidance,hist_guidance=hist_guidance)
         finally:hook.remove()
         final_error=float((pred[expanded]-fixed).abs().max())
-        if final_error!=0 or len(checks)!=2*int(cfg.algorithm.sample_steps):raise ValueError('Source clamping verification failed')
+        if final_error!=0 or len(checks)!=expected_conditioned_calls:raise ValueError('Source clamping verification failed')
         raw=((algo._views(pred,1)[0].float().clamp(-1,1)+1)*127.5).round().byte().permute(1,0,3,4,2).cpu().numpy()
     if raw.shape!=(len(rgb),4,160,320,3):
         raise ValueError('Unexpected decoded multiview RGB layout')
     observations=raw.copy();observations[:,0]=rgb
+    if custom_text and (file_sha256(text_embeddings)!=custom_text['embedding_sha256']
+                        or file_sha256(text_embedding_receipt)!=custom_text['receipt_sha256']):
+        raise ValueError('Custom text evidence changed during generation')
+    if file_sha256(output/'sampling-config.json')!=sampling_config_sha256:
+        raise ValueError('Sampling configuration changed during generation')
     np.savez_compressed(output/'generated.npz',rgb=raw,K=k,c2w=c,timestamps=times,observed_mask=known)
     np.savez_compressed(output/'observations.npz',rgb=observations,K=k,c2w=c,timestamps=times,observed_mask=known,source_frame_indices=ids)
     manifest=json.loads((condition/'input-manifest.json').read_text())
+    manifest['task_text_conditioning']=text_conditioning
     for artifact in manifest['artifacts']:
         if 'path' in artifact:artifact['path']=str((condition/artifact['path']).resolve())
     manifest['artifacts'] += [
@@ -227,7 +354,7 @@ def generate(*, condition, repository, config, checkpoint, checkpoint_receipt, o
          'scope':'global','parent_ids':[],'model_name':'Author WanMultiView RGB step10000',
          'revision':proof['checkpoint_sha256']},
         {'id':'generated_helper_rgb','kind':'rgb','origin':'model_prediction','generated':True,
-         'view_role':'helper','parent_ids':['virtual_camera_requests','world_model_weights'],
+         'view_role':'helper','parent_ids':[prep.get('conditioning_artifact_id','virtual_camera_requests'),'world_model_weights'],
          'path':'generated.npz','sha256':file_sha256(output/'generated.npz'),
          'time_range_s':[float(times[0]),float(times[-1])]},
         {'id':'reconstruction_rgb','kind':'rgb','origin':'model_prediction','generated':True,
@@ -243,7 +370,11 @@ def generate(*, condition, repository, config, checkpoint, checkpoint_receipt, o
         for row in observations:writer.append_data(np.concatenate(row,axis=1))
     report=dict(status='complete',mode='observed-video reconstruction',seconds=time.monotonic()-start,
                 checkpoint=str(checkpoint),checkpoint_sha256=proof['checkpoint_sha256'],driver_sha256=file_sha256(__file__),
-                preparation_sha256=file_sha256(condition/'preparation.json'),seed=seed,prompt_key=prompt_key,
+                preparation_sha256=file_sha256(condition/'preparation.json'),seed=seed,prompt_key=text_conditioning['prompt_key'],
+                text_conditioning=text_conditioning,
+                text_guidance=float(text_guidance),hist_guidance=float(hist_guidance),sampling_config_sha256=sampling_config_sha256,
+                conditioning_horizon=sampling_config['conditioning_horizon'],source_time_range_s=sampling_config['source_time_range_s'],
+                camera_design_horizon=sampling_config['camera_design_horizon'],
                 source_frames=len(rgb),total_views=4,generated_views=3,observed_extra_views=0,
                 supplied_dataset_cameras=False,measured_depth_used=False,simulator_used=False,
                 source_clamp_max_error=final_error,conditional_forward_checks=len(checks),
@@ -260,11 +391,18 @@ def main():
     a=sub.add_parser('prepare')
     for name in ['geometry-bundle','scene-path','scene-manifest','output']:a.add_argument('--'+name,type=Path,required=True)
     a.add_argument('--frames',type=int,default=25)
+    prefix=sub.add_parser('prepare-prefix')
+    for name in ['condition','output']:prefix.add_argument('--'+name,type=Path,required=True)
+    prefix.add_argument('--frames',type=int,default=17)
     g=sub.add_parser('generate')
     for name in ['condition','repository','config','checkpoint','checkpoint-receipt','output']:g.add_argument('--'+name,type=Path,required=True)
     g.add_argument('--prompt-key',default='task_0004');g.add_argument('--seed',type=int,default=20261119)
+    g.add_argument('--text-guidance',type=float,default=2.);g.add_argument('--hist-guidance',type=float,default=1.)
+    g.add_argument('--null-text',action='store_true',help='Use null text context rather than a cached task prompt; requires text guidance zero')
+    g.add_argument('--text-embeddings',type=Path,help='Author-format task/null embedding dictionary; requires a completed receipt')
+    g.add_argument('--text-embedding-receipt',type=Path)
     args=vars(p.parse_args());command=args.pop('command')
-    print(json.dumps((prepare if command=='prepare' else generate)(**args),indent=2))
+    print(json.dumps({'prepare':prepare,'prepare-prefix':prepare_prefix,'generate':generate}[command](**args),indent=2))
 
 
 if __name__=='__main__':main()

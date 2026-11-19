@@ -24,7 +24,7 @@ def draw_box(image,points,color):
     for a,b in EDGES:cv2.line(image,tuple(points[a]),tuple(points[b]),color,2,cv2.LINE_AA)
 
 
-def render(*, geometry_bundle, all_fit, rank_fit, output):
+def render(*, geometry_bundle, all_fit, rank_fit, output, left_label='All valid depth', right_label='Top 50% confidence rank'):
     import imageio.v2 as imageio
     output=Path(output)
     if output.exists():raise FileExistsError(output)
@@ -50,7 +50,7 @@ def render(*, geometry_bundle, all_fit, rank_fit, output):
     with imageio.get_writer(output/'comparison.mp4',fps=fps,codec='libx264',quality=8,macro_block_size=1) as writer:
         for f,time in enumerate(times):
             rows=[]
-            for scene,name,color in zip(scenes,['All valid depth','Top 50% confidence rank'],[(80,220,140),(250,180,70)]):
+            for scene,name,color in zip(scenes,[left_label,right_label],[(80,220,140),(250,180,70)]):
                 seen=scene['objects'][0]['observed'][f]
                 source=rgb[f].copy();plot=np.full_like(source,25)
                 n2=np.asarray(scene['support']['normal_world']);d2=scene['support']['offset_m']
@@ -77,4 +77,5 @@ def render(*, geometry_bundle, all_fit, rank_fit, output):
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     for name in ['geometry-bundle','all-fit','rank-fit','output']:parser.add_argument('--'+name,required=True,type=Path)
+    parser.add_argument('--left-label',default='All valid depth');parser.add_argument('--right-label',default='Top 50% confidence rank')
     render(**vars(parser.parse_args()))

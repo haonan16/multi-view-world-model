@@ -10,7 +10,10 @@ RGB-only reconstruction or a successful independent simulator rollout.
 - [Protocol and staged comparison matrix](README_protocol.md)
 - [External baseline installation and launch adapters](README_external_baselines.md)
 - [Source-only object initialization](README_source_geometry.md)
+- [Source-only refinement experiments](README_source_refinement.md)
 - [Fixed-registration TCP planning](README_registered_plan.md)
+- [Frozen execution in an independent reference scene](README_execution.md)
+- [Generated-camera consistency diagnostic](README_camera_audit.md)
 - `rgb_frontend.py`: isolate one recorded RGB camera, then predict metric depth
   and camera intrinsics with an existing local UniDepthV2 checkpoint.
 - `keyframe_compression.py`: compress saved fitted trajectories and measure the
@@ -71,6 +74,43 @@ manifest and not in its test manifest (split hash bucket 9051, test threshold
 200/10000). It remains a development/matched-ablation case, not held-out
 generalization evidence. HO-Cap is outside that RH20T fine-tuning dataset;
 pretraining exposure is not established.
+
+Follow-up source-only fitting found temporal drift in the predicted **static
+table**, not just errors on the moving block. Frame-zero-anchored multiplicative
+depth correction reduced held-out background-plane residual from 17.20 to
+3.65 mm. It also removed the planner's apparent pregrasp-motion violation.
+An independent RGB proximity/co-motion estimator found one continuous grasp
+hypothesis at frames 29–67, while retaining conflicting 3D-distance evidence.
+
+Joint shape/translation fitting with soft support improved source silhouettes
+but left 6–9 mm penetration near release. A separate optimizer parameterized
+every frame with nonnegative table clearance, keeping the same depth,
+silhouette, temporal and support losses. Both variants then compiled through
+unchanged geometric planner guards. Mean support residual fell to 0.84/1.36 mm,
+while depth surface residual increased from about 2.4 to 3.0 mm and the inferred
+box became flatter. These are source-model consistency metrics, not GT shape
+accuracy or execution success. No endpoint was moved after planning.
+
+Fresh 25-frame world-model helpers completed with source-latent clamping checked
+at every conditioned forward pass. However, matched static backgrounds moved
+only 0.27/0.30/0.78 pixels, where the requested cameras predict approximately
+21–24 pixels. DA3's unposed estimates also gave almost zero source/helper
+baseline for the first two generated views. Five generated keyframes did not
+fix this: the first two helpers remained source-like, and the third's matched
+motion disagreed with its requested camera. Requested poses therefore cannot
+be treated as verified extrinsics for fusion. These diagnostics use predicted
+depth/K and correlated background matches, not GT camera measurements.
+
+Fresh RGB-only MANO initialization and the actual RobotFitter port have also
+run on both clips (100-iteration diagnostic budget). The bottle and block port
+stages took 297.0 and 172.7 seconds, respectively. Mean reprojection error to
+predicted RGB landmarks fell from 7.73 to 2.74 pixels and 9.68 to 2.48 pixels.
+This is not a hand-pose GT metric: bottle finger contact/handedness remain
+uncertain, and the relevant block hand lacks accepted evidence after frame 67.
+The first side-selection diagnostic tested both licensed hand priors but bound
+only the selected prior in its manifest; the current adapter binds both and
+adds an explicit soft detector-handedness-prior alternative. Earlier outputs
+are preserved rather than relabeled.
 
 ## Legacy independent-scene control, 2026-11-19
 

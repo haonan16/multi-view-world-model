@@ -172,6 +172,10 @@ def prepare(*, submission, raw_reference, source_cameras, source_view, deploymen
         "fitted_alignment": False, "support_snap": False,
         "deployment_hash_must_match_across_compared_methods": file_sha256(deployment),
         "initial_support_gap_m": float(data["support_minimum_m"][0]), "per_frame_support_minimum_m": data["support_minimum_m"].tolist(),
+        "support_tilt_from_robot_positive_z_deg": float(np.degrees(np.arccos(np.clip(data["support_normal"][2],-1.,1.)))),
+        "support_normal_robot": data["support_normal"].tolist(), "support_plane_offset_robot_m": float(data["support_offset"]),
+        "assumed_gravity_direction_robot": [0.,0.,-1.],
+        "gravity_interpretation": "Native deployment gravity is along robot -Z. Estimated deployment rotation may tilt the independent reference support; no gravity or support realignment is applied.",
         "canonicalization_max_surface_error_m": data["canonicalization_max_surface_error_m"],
         "shared_shape_variation_m": data["shared_shape_variation_m"], "script_sha256": file_sha256(__file__),
         "limitation": "Reference camera/geometry/depth are evaluator-only; proxy geometry and supplied material properties have error"}
