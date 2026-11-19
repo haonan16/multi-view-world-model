@@ -85,3 +85,141 @@ tokenizer implementation, exact text, tensor shapes and dtype. The receipt and
 embedding are rechecked after inference. Task text is recorded explicitly as
 conditioning metadata, not mislabeled as ground-truth geometry or global model
 weights. This metadata does not add a new modality to the input-protocol DAG.
+
+## Published-rig first-frame control
+
+A separate **calibrated RGB diagnostic** replaced both estimated intrinsics K
+and designed virtual poses C with the original RH20T camera calibration. This
+is not a strict RGB-only result or a validated forecasting/planning result.
+The same first source image was observed; all later source images and all three
+target views were generated. No target RGB, future RGB, measured depth or object
+geometry conditioned the sampler.
+
+The control used source `036422060215` and targets `037522062165`,
+`104122061850`, `104122063678`. Original publisher files were recovered from the
+verified archive, not from the historically RGB-D-repaired camera bundle:
+
+| File | SHA-256 |
+| --- | --- |
+| `selected-mano-trials-20261111/intrinsics.npy` | `9975592f2cfbe451adfd87a5d10a358546847476cc9380ba071ed6fb73eae91c` |
+| `selected-mano-trials-20261111/extrinsics.npy` | `ea9c8237f6395ed14f9444002fd3e152161ea3f5364b69bb567ef3506fb8f384` |
+
+The original loader's convention was preserved: invert publisher world-to-camera
+extrinsics, express all poses relative to camera 0, scale K from 1280×720 to
+640×360, subtract the `[0,20,640,320]` crop origin, then resize K and RGB to
+320×160. Proper rotations, source identity, nonzero baselines and finite arrays
+were checked. Camera baselines were 0.992, 1.272 and 1.016 metres before the
+unchanged author's mean-baseline normalization. The manifest explicitly records
+`condition=calibrated_rgb` and `origin=known_calibration`; these matrices are
+conditioning requests, not evidence that the output obeys them.
+
+Exact paired sampler checks passed: 17 frames, 30 sampling steps, seed 20261119,
+text/history guidance `(0,0)`, cached `task_0004` text, the same config and
+step-10000 checkpoint, and exactly one observed source image. Both runs made
+30 source-clamp checks with zero error. The prepared source RGB byte digest was
+`fa6776bc8f33d02699e47871e1abe86b5705ec4927475cbfff217ae628e4671d`;
+all future/target conditioning pixels were zero. Only K and C changed
+numerically. The isolated driver snapshot changed input validation and
+provenance labels; the author sampler and VAE were unchanged. The saved
+`driver-provenance.diff`, `frozen-config.json`, `prep-audit.json`, and
+`sampling-match-audit.json` record these checks.
+
+**Observed result:** the published rig produces visibly different tabletop
+viewpoints. These roughly follow the orientations and layout in the actual
+recorded target views, unlike the two virtual-rig helpers that nearly copy the
+source. Object placement and invented background details still differ. This
+identifies camera conditioning as an actionable contributor; it does not prove
+accurate geometry or correct generated motion. K and C changed together here,
+so their individual effects are not yet isolated.
+
+The fixed source-feature audit found only 6, 0 and 0 homography inliers in the
+three wide-baseline generated views, below its unchanged minimum of 8. Their
+parallax/epipolar accuracy is therefore **unmeasured**, not a pass. A separate
+post-generation t0 contact sheet uses the four recorded RGB views for visual
+evaluation only; repaired extrinsics and depth arrays are ignored. The
+recorded targets correspond to the published rig; virtual requests are different
+viewpoints and are not expected to pixel-align with those recorded targets. The
+generation source came through the existing video encoding and differs from
+the preserved RGB packet by 0.946/255 mean absolute intensity, while source
+pixels are exactly identical between the two generation runs.
+
+The published-rig job completed in 5m47s, with a reported model-stage duration of
+35.47s and peak allocated GPU memory of 7.62 GB. The earlier virtual-rig run
+reported 145.86s for that stage. Both used A100 3g.20GB slices on different nodes;
+loading/cache/runtime variability was not isolated. **This is not a speedup
+measurement.**
+
+Compact media and receipts are under
+`outputs/rgb-only-20261119/media/wm-published-camera-control/` relative to this
+directory: `camera-conditioning-comparison.mp4`, `frame-000.png`,
+`frame-016.png`, `observed-targets-t0.png`, and JSON audits. The durable cluster
+run is `wm-calibrated-first-frame-20261119` under the user's lab-storage directory.
+No model/data assets or generated media belong in the code commit.
+
+### Predeclared K/C crossover
+
+Two additional conditions were frozen together before a single capped GPU job:
+estimated K + published C, and published K + virtual C. They use the same
+source pixels, 17 frames, 30 steps, checkpoint, seed and `(0,0)` guidance above.
+Exact array comparisons establish the intended two-by-two crossing. Both are
+`calibrated_rgb` diagnostics; the estimated camera component retains its
+original full-source camera-estimation ancestry, so neither is relabeled as a
+strict one-frame forecast. Their conditioning tensors still contain no future
+or target RGB pixels. No additional variants or automatic retries are part of
+this batch. Results must be reported only after both generation receipts and
+the frozen-config checks pass.
+
+### Reproduce the calibrated controls from the package
+
+`calibrated_camera_controls.py` packages preparation and the exact two-way K/C
+crossing. `world_model_views.py generate --calibrated-camera-diagnostic` is the
+explicit generation opt-in; the default RGB-only path rejects supplied-camera
+lineage before importing GPU dependencies. Old frozen cluster driver files
+remain unchanged; packaging does not imply an additional GPU reproduction.
+
+Prepare a verified shared `calibrated_rgb` manifest containing these numeric
+NPZ artifacts (no pickle is accepted by this adapter):
+
+- One observed source artifact with `rgb[1,H,W,3]` uint8 and `timestamps[1]`.
+  Set its `camera_id` or `source_camera_id` to the source serial. If absent, the
+  preparation explicitly records the caller's assumption that rig camera 0 is
+  the source; it does not claim independent identity verification.
+- A `known_calibration` rig artifact with `K[4,3,3]`, camera-to-world
+  `c2w[4,4,4]`, original `resolution_wh[2]`, and four ordered `camera_ids`.
+  For the verified RH20T files above, use `K=intrinsics[serial][:,:3]` and
+  `c2w=inverse(extrinsics[serial][0])`, with resolution `[1280,720]`.
+  Record the original calibration files/hashes in its provenance. The adapter
+  handles source resolution, crop/resize and source-relative transforms.
+
+The timestamp JSON contains 17 increasing output labels beginning at the one
+observed timestamp; it contains no future images. Newly prepared files mark
+future source-frame indices `-1` instead of inventing observations. For the
+measured control, the labels were
+`[0,.3,.7,1,1.3,1.6,2,2.3,2.6,3,3.3,3.6,4,4.3,4.6,4.9,5.3]` seconds.
+
+```bash
+python articulated_recon/benchmarks/calibrated_camera_controls.py prepare \
+  --input-manifest camera-inputs.json --source-id source_frame \
+  --rig-id published_rig --timestamps-json output-times.json --output condition
+
+python articulated_recon/benchmarks/world_model_views.py generate \
+  --condition condition --repository /path/to/author/repo \
+  --config /path/to/author/config.yaml --checkpoint /path/to/checkpoint.ckpt \
+  --checkpoint-receipt /path/to/model-preflight.json --output new-result \
+  --seed 20261119 --conditioning first_frame_diagnostic \
+  --text-guidance 0 --hist-guidance 0 --calibrated-camera-diagnostic
+
+python articulated_recon/benchmarks/calibrated_camera_controls.py cross \
+  --estimated-condition /path/to/original-17-frame-condition \
+  --published-condition condition --output new-crossed-conditions
+```
+
+Use the same explicit generator command for each crossed subdirectory. No
+automatic submission, installation or retry is performed. `cross` verifies
+identical source pixels and timestamps, preserves full estimated-camera
+ancestry, swaps only K/C arrays, and obtains all future conditioning pixels
+from the zero-filled published control. The supplied-camera status remains
+explicit in manifests, sampling settings and generation receipts. Focused CPU
+tests cover the crop/coordinate transform, wrong source identity, default-path
+rejection, future-image rejection even after valid hash updates, and exact
+crossed arrays without modifying their parents.

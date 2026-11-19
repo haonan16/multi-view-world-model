@@ -261,22 +261,36 @@ def configure_text_conditioning(algo, prompt_key, *, null_text, text_guidance, c
     return {'mode':'cached_task_prompt','prompt_key':prompt_key,'task_text_used':True}
 
 
+def generation_preparation(condition, *, conditioning='full_source', text_guidance=2., hist_guidance=1., calibrated_camera_diagnostic=False):
+    """Validate the input boundary before importing GPU/model dependencies."""
+    condition=Path(condition).resolve()
+    if calibrated_camera_diagnostic:
+        from benchmarks.calibrated_camera_controls import validate_generation
+        prep,input_report=validate_generation(condition,conditioning,text_guidance,hist_guidance)
+    else:
+        prep=json.loads((condition/'preparation.json').read_text())
+        input_report=load_manifest(condition/'input-manifest.json',[('cameras',condition/'condition.npz')])
+        if input_report['condition']!='rgb_only':
+            raise ValueError('Calibrated cameras require explicit --calibrated-camera-diagnostic opt-in')
+        if prep['mode']!='reconstruction' or file_sha256(condition/'condition.npz')!=prep['condition_sha256']:
+            raise ValueError('Condition changed or unsupported forecast preparation')
+        for key in ['geometry_manifest','scene_manifest']:
+            if file_sha256(prep[key])!=prep[key+'_sha256']:raise ValueError('Preparation ancestry changed')
+            load_manifest(prep[key])
+    return prep,input_report
+
+
 def generate(*, condition, repository, config, checkpoint, checkpoint_receipt, output,
              prompt_key='task_0004', seed=20261119, text_guidance=2., hist_guidance=1., null_text=False,
-             text_embeddings=None,text_embedding_receipt=None,conditioning='full_source'):
+             text_embeddings=None,text_embedding_receipt=None,conditioning='full_source',calibrated_camera_diagnostic=False):
     """Run the unchanged author sampler, verifying source-latent clamping."""
+    condition, output, repository = Path(condition).resolve(),Path(output).resolve(),Path(repository).resolve()
+    if output.exists(): raise FileExistsError(output)
+    prep,input_report=generation_preparation(condition,conditioning=conditioning,text_guidance=text_guidance,
+        hist_guidance=hist_guidance,calibrated_camera_diagnostic=calibrated_camera_diagnostic)
     import torch
     import imageio.v2 as imageio
     from omegaconf import OmegaConf
-    condition, output, repository = Path(condition).resolve(),Path(output).resolve(),Path(repository).resolve()
-    if output.exists(): raise FileExistsError(output)
-    prep=json.loads((condition/'preparation.json').read_text())
-    load_manifest(condition/'input-manifest.json',[('cameras',condition/'condition.npz')])
-    if prep['mode']!='reconstruction' or file_sha256(condition/'condition.npz')!=prep['condition_sha256']:
-        raise ValueError('Condition changed or unsupported forecast preparation')
-    for key in ['geometry_manifest','scene_manifest']:
-        if file_sha256(prep[key])!=prep[key+'_sha256']:raise ValueError('Preparation ancestry changed')
-        load_manifest(prep[key])
     proof=json.loads(Path(checkpoint_receipt).read_text()); checkpoint=Path(checkpoint).resolve();config=Path(config).resolve()
     if proof['checkpoint']!=str(checkpoint) or proof['checkpoint_bytes']!=checkpoint.stat().st_size or checkpoint.stat().st_mtime_ns>Path(checkpoint_receipt).stat().st_mtime_ns:
         raise ValueError('Existing full checkpoint hash receipt no longer applies')
@@ -316,7 +330,8 @@ def generate(*, condition, repository, config, checkpoint, checkpoint_receipt, o
         conditioning_horizon=prep.get('conditioning_horizon','Full sampled source clip'),custom_text_conditioning=custom_text,
         conditioning_mode=conditioning,observed_source_frames=int(known[:,0].sum()),
         observed_source_time_range_s=[float(times[known[:,0]][0]),float(times[known[:,0]][-1])],
-        strict_forecasting_claim=False)
+        strict_forecasting_claim=False,input_condition=input_report['condition'],
+        calibrated_camera_diagnostic=calibrated_camera_diagnostic)
     if custom_text:sampling_config['text_conditioning']='custom_task_prompt'
     (output/'sampling-config.json').write_text(json.dumps(sampling_config,indent=2))
     sampling_config_sha256=file_sha256(output/'sampling-config.json')
@@ -367,7 +382,7 @@ def generate(*, condition, repository, config, checkpoint, checkpoint_receipt, o
     manifest=json.loads((condition/'input-manifest.json').read_text())
     manifest['task_text_conditioning']=text_conditioning
     manifest['conditioning_diagnostic']={'mode':conditioning,'observed_source_frames':int(known[:,0].sum()),
-        'strict_forecasting_claim':False,'camera_ancestry':'Original full-source initializer remains active'}
+        'strict_forecasting_claim':False,'camera_ancestry':prep['camera_design_horizon'] if calibrated_camera_diagnostic else 'Original full-source initializer remains active'}
     for artifact in manifest['artifacts']:
         if 'path' in artifact:artifact['path']=str((condition/artifact['path']).resolve())
     manifest['artifacts'] += [
@@ -389,7 +404,7 @@ def generate(*, condition, repository, config, checkpoint, checkpoint_receipt, o
     fps=(len(times)-1)/(times[-1]-times[0])
     with imageio.get_writer(output/'source-and-generated.mp4',fps=fps,codec='libx264',quality=8) as writer:
         for row in observations:writer.append_data(np.concatenate(row,axis=1))
-    report=dict(status='complete',mode='observed-video reconstruction' if conditioning=='full_source' else 'first-frame conditioning diagnostic with full-clip camera ancestry',seconds=time.monotonic()-start,
+    report=dict(status='complete',mode='calibrated first-frame camera-response diagnostic' if calibrated_camera_diagnostic else ('observed-video reconstruction' if conditioning=='full_source' else 'first-frame conditioning diagnostic with full-clip camera ancestry'),seconds=time.monotonic()-start,
                 checkpoint=str(checkpoint),checkpoint_sha256=proof['checkpoint_sha256'],driver_sha256=file_sha256(__file__),
                 preparation_sha256=file_sha256(condition/'preparation.json'),seed=seed,prompt_key=text_conditioning['prompt_key'],
                 text_conditioning=text_conditioning,
@@ -399,10 +414,10 @@ def generate(*, condition, repository, config, checkpoint, checkpoint_receipt, o
                 conditioning_mode=conditioning,observed_source_frames=int(known[:,0].sum()),
                 observed_source_time_range_s=sampling_config['observed_source_time_range_s'],strict_forecasting_claim=False,
                 source_frames=len(rgb),total_views=4,generated_views=3,observed_extra_views=0,
-                supplied_dataset_cameras=False,measured_depth_used=False,simulator_used=False,
+                supplied_dataset_cameras=calibrated_camera_diagnostic,measured_depth_used=False,simulator_used=False,
                 source_clamp_max_error=final_error,conditional_forward_checks=len(checks),
                 generated_sha256=file_sha256(output/'generated.npz'),observations_sha256=file_sha256(output/'observations.npz'),
-                virtual_camera_scale_m=scale,peak_gpu_gb=torch.cuda.max_memory_allocated()/1e9,
+                **({'requested_camera_baseline_scale_m':scale} if calibrated_camera_diagnostic else {'virtual_camera_scale_m':scale}),peak_gpu_gb=torch.cuda.max_memory_allocated()/1e9,
                 source_pixels='Only declared observed source frames are restored; unobserved source-view future remains generated. Raw decoder output retained in generated.npz',
                 caveats=[prep['training_caveat'],'Generated camera consistency and object accuracy are unmeasured.'])
     (output/'generation.json').write_text(json.dumps(report,indent=2));print(json.dumps(report,indent=2),flush=True)
@@ -426,6 +441,8 @@ def main():
     g.add_argument('--text-embedding-receipt',type=Path)
     g.add_argument('--conditioning',choices=['full_source','first_frame_diagnostic'],default='full_source',
                    help='First-frame diagnostic retains full-clip camera ancestry and is not a strict forecast experiment')
+    g.add_argument('--calibrated-camera-diagnostic',action='store_true',
+                   help='Explicit supplied-camera diagnostic only; requires calibrated_rgb, first-frame conditioning and guidance 0/0')
     args=vars(p.parse_args());command=args.pop('command')
     print(json.dumps({'prepare':prepare,'prepare-prefix':prepare_prefix,'generate':generate}[command](**args),indent=2))
 

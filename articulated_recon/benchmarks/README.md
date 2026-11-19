@@ -21,6 +21,7 @@ has not been demonstrated by these experiments.
 - [SAM3D shape-prior comparison](README_shape_prior.md)
 - [Matched UniDepth / DA3 Metric experiment](README_depth_comparison.md)
 - [Posthoc sensor-depth and confidence audit](README_confidence_audit.md)
+- [Independent HO-Cap hand, object and camera evaluation](README_hocap_evaluation.md)
 - `rgb_frontend.py`: isolate one recorded RGB camera, then predict metric depth
   and camera intrinsics with an existing local UniDepthV2 checkpoint.
 - `keyframe_compression.py`: compress saved fitted trajectories and measure the
@@ -183,6 +184,27 @@ This primarily restores the missing lift segment. The combined change does not
 isolate depth bias from sparse-frame motion or occlusion. The actual SAM3D
 nozzle topology is retained; contact remains unknown and no bottle plan is
 declared ready. See [the detailed bottle comparison](README_rgb_hands.md).
+
+Independent HO-Cap annotations confirm that the hand's articulation improved:
+mean corresponding-vertex error after subtracting each hand's own wrist fell
+from 27.96 to 9.40 mm. This diagnostic does not rotate or rescale either hand.
+Absolute vertex error worsened from 62.93 to 75.99 mm, with approximately
+80 mm wrist-position error remaining. Better articulation therefore did not
+solve global placement. The dataset MANO surface was reproduced from its
+original parameters and verified against camera-frame joint annotations;
+landmark-definition differences are recorded separately.
+
+The exact HO-Cap bottle CAD/pose comparison likewise distinguishes tracking from
+metric accuracy. On the same four supported keyframes, v1 to v2 centroid error
+changed from 96.04 to 102.31 mm and unaligned symmetric surface-sample distance
+from 66.37 to 69.56 mm. Recovering the remaining nine keyframes does not establish
+better placement on the common frames. Sorted bounding-dimension error improved
+from 15.33 to 12.20 mm, but minimum thickness remained 42.05 mm versus the CAD's
+66.53 mm (v1: 32.62 mm). This isolates an extent improvement, not complete shape
+accuracy. Held-out camera overlays use unchanged
+frozen geometry and publisher calibration only in the evaluator. The historical
+observation bundle differs from the original cameras by one common rigid world
+frame; its relative camera transforms and intrinsic matrices were verified.
 
 An evaluator-only HO-Cap audit compared these frozen metric depth predictions
 with the corresponding measured depth, without scale correction. UniDepth's
