@@ -169,6 +169,37 @@ or target RGB pixels. No additional variants or automatic retries are part of
 this batch. Results must be reported only after both generation receipts and
 the frozen-config checks pass.
 
+**Completed result:** both crossed conditions and the frozen audit passed in
+one 13m40s GPU job, with 30 zero-error source-clamp checks per condition. The
+same source frame, checkpoint/config hashes, seed, 17-frame horizon, 30 sampling
+steps and `(0,0)` guidance were retained across all four cells.
+
+| K | Camera poses C | Helper 1/2 median measured shift | Helper 1/2 median requested shift | Result |
+| --- | --- | --- | --- | --- |
+| Estimated | Virtual | 0.44 / 0.46 px | 15.34 / 12.36 px | Near-source copies; 101 / 76 retained matches |
+| Published | Virtual | 0.46 / 0.47 px | 16.03 / 12.36 px | Near-source copies persist; 108 / 77 retained matches |
+| Estimated | Published | Unmeasured | Unmeasured | Visibly distinct viewpoints; only 0 / 7 / 0 target homography inliers |
+| Published | Published | Unmeasured | Unmeasured | Visibly distinct viewpoints; only 6 / 0 / 0 target homography inliers |
+
+With either K and virtual C, identity projection was closer for every retained
+helper-1/2 match. Published K alone therefore did not remove this failure.
+Changing C produced the large viewpoint change with either K. **For this one
+clip/seed, camera-pose requests explain the major qualitative response; changing
+intrinsics alone does not fix the near-copy behavior.** This does not establish
+that intrinsic accuracy is generally unimportant, or that training-distribution
+mismatch is the underlying cause. The wide-view cases still fail the feature
+count threshold, so neither earns a geometric-accuracy pass. Invented background
+details and object-placement differences remain; future motion is not GT-scored.
+
+The new cells' reported model-stage durations were 44.44s (estimated K +
+published C) and 36.11s (published K + virtual C), both with 7.62 GB peak allocated
+GPU memory. Setup/verification dominates job wall time; these timings are not
+a controlled performance comparison. All outputs and failures/limitations are
+preserved under cluster `wm-camera-cross-20261119`; compact four-condition media
+are in `outputs/rgb-only-20261119/media/wm-camera-cross-control/` relative to this
+directory (`camera-cross-comparison.mp4`, `frame-000.png`, `frame-016.png`,
+`report.json`, `frozen-config.json`). No further conditions or retries ran.
+
 ### Reproduce the calibrated controls from the package
 
 `calibrated_camera_controls.py` packages preparation and the exact two-way K/C

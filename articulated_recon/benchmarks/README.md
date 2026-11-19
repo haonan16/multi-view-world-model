@@ -163,6 +163,17 @@ embedding. Matched backgrounds moved 0.37/0.36/0.60 pixels versus approximately
 viewpoint change. These helpers are therefore not fused under their requested
 poses as if they were calibrated observations.
 
+A subsequent block camera-control experiment isolated intrinsics K from camera
+poses C in a two-by-two comparison. The same first source image, 17-frame horizon,
+checkpoint, seed and sampler produced visibly different viewpoints with the
+published rig poses under either K. Published K alone with the virtual poses
+still produced near-copies: helpers 1/2 shifted 0.459/0.474 pixels versus
+16.03/12.36 requested. On this case, our virtual pose requests are therefore an
+actionable contributor to the weak camera response. This is a calibrated-camera
+diagnostic, not a strict RGB-only improvement. The wide-view outputs have too few
+reliable feature matches to verify camera accuracy; they have not been fused into
+a reconstruction or used for planning. See [the complete camera comparison](README_camera_audit.md).
+
 Fresh RGB-only MANO initialization and the actual RobotFitter port have also
 run on both clips (100-iteration diagnostic budget). The bottle and block port
 stages took 297.0 and 172.7 seconds, respectively. Mean reprojection error to
