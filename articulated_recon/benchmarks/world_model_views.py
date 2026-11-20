@@ -72,7 +72,10 @@ def reconstruction_condition(rgb, mode):
 def restore_observed_source(raw, source, known):
     if known.shape!=raw.shape[:2] or known[:,1:].any():
         raise ValueError('Only declared source-view pixels may be restored')
-    output=raw.copy();output[known[:,0],0]=source[known[:,0]]
+    if len(source) == len(raw): observed = source[known[:,0]]
+    elif len(source) == 1 and known.sum() == 1 and known[0,0]: observed = source
+    else: raise ValueError('Source RGB does not match the declared observed frames')
+    output=raw.copy();output[known[:,0],0]=observed
     return output
 
 
@@ -264,6 +267,11 @@ def configure_text_conditioning(algo, prompt_key, *, null_text, text_guidance, c
 def generation_preparation(condition, *, conditioning='full_source', text_guidance=2., hist_guidance=1., calibrated_camera_diagnostic=False):
     """Validate the input boundary before importing GPU/model dependencies."""
     condition=Path(condition).resolve()
+    if conditioning == 'strict_forecast':
+        if calibrated_camera_diagnostic:
+            raise ValueError('Strict RGB forecast cannot use the calibrated diagnostic opt-in')
+        from benchmarks.strict_forecast import validate_forecast
+        return validate_forecast(condition)
     if calibrated_camera_diagnostic:
         from benchmarks.calibrated_camera_controls import validate_generation
         prep,input_report=validate_generation(condition,conditioning,text_guidance,hist_guidance)
@@ -304,7 +312,10 @@ def generate(*, condition, repository, config, checkpoint, checkpoint_receipt, o
     from datasets.aria_new import camera_to_raymap
     with np.load(condition/'condition.npz',allow_pickle=False) as z:
         rgb,k,c,times,ids=[z[n].copy() for n in ['rgb','K','c2w','timestamps','source_frame_indices']]
-    tensor,known=reconstruction_condition(rgb,conditioning)
+    strict_forecast = conditioning == 'strict_forecast'
+    tensor,known=(source_tensor(rgb,forecast=True,total_frames=len(times)) if strict_forecast
+                  else reconstruction_condition(rgb,conditioning))
+    total_frames = len(times)
     cfg=OmegaConf.load(config)
     expected_conditioned_calls=checked_guidance(text_guidance,hist_guidance,cfg.algorithm.sample_steps)
     if null_text and text_guidance!=0: raise ValueError('Explicit null text requires --text-guidance 0')
@@ -314,6 +325,12 @@ def generate(*, condition, repository, config, checkpoint, checkpoint_receipt, o
     if custom_text:
         cfg.algorithm.text.enabled=True
         cfg.algorithm.text.embeds_path=str(Path(text_embeddings).resolve())
+    strict_task = None
+    if strict_forecast:
+        from benchmarks.strict_forecast import bind_task
+        if not cfg.algorithm.text.enabled:
+            raise ValueError('Strict task forecast requires enabled task conditioning')
+        strict_task = bind_task(prep, cfg.algorithm.text.embeds_path, prompt_key, null_text, custom_text)
     if cfg.algorithm.design!='tokens' or (cfg.dataset.height,cfg.dataset.width)!=(160,320):
         raise ValueError('This driver requires the reviewed tokens design and320x160 model')
     cfg.algorithm.model.tuned_ckpt_path=None;cfg.algorithm.gradient_checkpointing_rate=0.
@@ -324,14 +341,15 @@ def generate(*, condition, repository, config, checkpoint, checkpoint_receipt, o
         author_validation_hist_guidance=float(cfg.algorithm.get('val_hist_guidance',0.)),
         model_config_sha256=file_sha256(config),checkpoint_sha256=proof['checkpoint_sha256'],
         driver_sha256=file_sha256(__file__),condition_sha256=file_sha256(condition/'condition.npz'),
-        preparation_sha256=file_sha256(condition/'preparation.json'),conditioning_frames=len(rgb),
+        preparation_sha256=file_sha256(condition/'preparation.json'),conditioning_frames=total_frames,
         source_time_range_s=[float(times[0]),float(times[-1])],target_view_observed_anchors=0,
         extra_observed_views=0,camera_design_horizon=prep.get('camera_design_horizon','Full source-clip initializer'),
         conditioning_horizon=prep.get('conditioning_horizon','Full sampled source clip'),custom_text_conditioning=custom_text,
         conditioning_mode=conditioning,observed_source_frames=int(known[:,0].sum()),
         observed_source_time_range_s=[float(times[known[:,0]][0]),float(times[known[:,0]][-1])],
-        strict_forecasting_claim=False,input_condition=input_report['condition'],
+        strict_forecasting_claim=strict_forecast,input_condition=input_report['condition'],
         calibrated_camera_diagnostic=calibrated_camera_diagnostic)
+    if strict_task: sampling_config['exact_task_binding'] = strict_task
     if custom_text:sampling_config['text_conditioning']='custom_task_prompt'
     (output/'sampling-config.json').write_text(json.dumps(sampling_config,indent=2))
     sampling_config_sha256=file_sha256(output/'sampling-config.json')
@@ -343,6 +361,7 @@ def generate(*, condition, repository, config, checkpoint, checkpoint_receipt, o
     algo.model.load_state_dict(state,strict=True);del weights,state
     algo=algo.to(dtype=torch.bfloat16).to('cuda').eval()
     text_conditioning=configure_text_conditioning(algo,prompt_key,null_text=null_text,text_guidance=text_guidance,custom=custom_text)
+    if strict_task: text_conditioning = {**text_conditioning, **strict_task}
     K=torch.tensor(k,dtype=torch.float32);C=torch.tensor(c,dtype=torch.float32)
     scale=float(C[1:,:3,3].norm(dim=-1).mean());C[:,:3,3]/=scale
     kr=K.clone();kr[:,0]*=40/320;kr[:,1]*=20/160
@@ -351,7 +370,7 @@ def generate(*, condition, repository, config, checkpoint, checkpoint_receipt, o
     checks=[];torch.cuda.reset_peak_memory_stats()
     with torch.inference_mode(),torch.autocast('cuda',dtype=torch.bfloat16):
         lat,cond=algo.pack(batch)
-        if lat.ndim!=6 or lat.shape[1]!=4 or lat.shape[2]!=16 or lat.shape[3]!=(len(rgb)-1)//4+1:
+        if lat.ndim!=6 or lat.shape[1]!=4 or lat.shape[2]!=16 or lat.shape[3]!=(total_frames-1)//4+1:
             raise ValueError('Unexpected packed multiview VAE layout')
         hm=torch.zeros(lat.shape[:2]+lat.shape[3:4],dtype=torch.bool,device=lat.device)
         if conditioning=='full_source':hm[:,0,:]=True
@@ -369,7 +388,7 @@ def generate(*, condition, repository, config, checkpoint, checkpoint_receipt, o
         final_error=float((pred[expanded]-fixed).abs().max())
         if final_error!=0 or len(checks)!=expected_conditioned_calls:raise ValueError('Source clamping verification failed')
         raw=((algo._views(pred,1)[0].float().clamp(-1,1)+1)*127.5).round().byte().permute(1,0,3,4,2).cpu().numpy()
-    if raw.shape!=(len(rgb),4,160,320,3):
+    if raw.shape!=(total_frames,4,160,320,3):
         raise ValueError('Unexpected decoded multiview RGB layout')
     observations=restore_observed_source(raw,rgb,known)
     if custom_text and (file_sha256(text_embeddings)!=custom_text['embedding_sha256']
@@ -377,18 +396,30 @@ def generate(*, condition, repository, config, checkpoint, checkpoint_receipt, o
         raise ValueError('Custom text evidence changed during generation')
     if file_sha256(output/'sampling-config.json')!=sampling_config_sha256:
         raise ValueError('Sampling configuration changed during generation')
+    if strict_forecast:
+        # Recheck source/scene/camera hashes after inference before emitting a strict claim.
+        generation_preparation(condition,conditioning=conditioning)
+        if file_sha256(strict_task['embedding_path']) != strict_task['embedding_sha256']:
+            raise ValueError('Exact task embedding changed during forecast generation')
     np.savez_compressed(output/'generated.npz',rgb=raw,K=k,c2w=c,timestamps=times,observed_mask=known)
     np.savez_compressed(output/'observations.npz',rgb=observations,K=k,c2w=c,timestamps=times,observed_mask=known,source_frame_indices=ids)
     manifest=json.loads((condition/'input-manifest.json').read_text())
     manifest['task_text_conditioning']=text_conditioning
     manifest['conditioning_diagnostic']={'mode':conditioning,'observed_source_frames':int(known[:,0].sum()),
-        'strict_forecasting_claim':False,'camera_ancestry':prep['camera_design_horizon'] if calibrated_camera_diagnostic else 'Original full-source initializer remains active'}
+        'strict_forecasting_claim':strict_forecast,'camera_ancestry':prep['camera_design_horizon'] if calibrated_camera_diagnostic or strict_forecast else 'Original full-source initializer remains active'}
     for artifact in manifest['artifacts']:
         if 'path' in artifact:artifact['path']=str((condition/artifact['path']).resolve())
-    manifest['artifacts'] += [
+    weights_record = (
         {'id':'world_model_weights','kind':'model_prior','origin':'prior','prior_type':'learned_model_weights',
          'scope':'global','parent_ids':[],'model_name':'Author WanMultiView RGB step10000',
-         'revision':proof['checkpoint_sha256']},
+         'revision':proof['checkpoint_sha256']})
+    manifest['artifacts'].append(weights_record)
+    if strict_forecast:
+        from benchmarks.strict_forecast import generated_records
+        manifest['artifacts'] += generated_records(output, times)
+        manifest['method_inputs'] += ['generated_source_forecast', 'generated_helper_rgb']
+    else:
+        manifest['artifacts'] += [
         {'id':'generated_helper_rgb','kind':'rgb','origin':'model_prediction','generated':True,
          'view_role':'helper','parent_ids':[prep.get('conditioning_artifact_id','virtual_camera_requests'),'world_model_weights'],
          'path':'generated.npz','sha256':file_sha256(output/'generated.npz'),
@@ -398,13 +429,13 @@ def generate(*, condition, repository, config, checkpoint, checkpoint_receipt, o
          'path':'observations.npz','sha256':file_sha256(output/'observations.npz'),
          'time_range_s':[float(times[0]),float(times[-1])],
          'mixed_origin_rule':'Only observed_mask=true pixels are original RGB; all others remain generated, including source-view future in first-frame diagnostic mode'}]
-    manifest['method_inputs'] += ['reconstruction_rgb']
+        manifest['method_inputs'] += ['reconstruction_rgb']
     validate_manifest(manifest,output,verify_files=True)
     (output/'input-manifest.json').write_text(json.dumps(manifest,indent=2))
     fps=(len(times)-1)/(times[-1]-times[0])
     with imageio.get_writer(output/'source-and-generated.mp4',fps=fps,codec='libx264',quality=8) as writer:
         for row in observations:writer.append_data(np.concatenate(row,axis=1))
-    report=dict(status='complete',mode='calibrated first-frame camera-response diagnostic' if calibrated_camera_diagnostic else ('observed-video reconstruction' if conditioning=='full_source' else 'first-frame conditioning diagnostic with full-clip camera ancestry'),seconds=time.monotonic()-start,
+    report=dict(status='complete',mode='strict first-image task-conditioned RGB forecast' if strict_forecast else ('calibrated first-frame camera-response diagnostic' if calibrated_camera_diagnostic else ('observed-video reconstruction' if conditioning=='full_source' else 'first-frame conditioning diagnostic with full-clip camera ancestry')),seconds=time.monotonic()-start,
                 checkpoint=str(checkpoint),checkpoint_sha256=proof['checkpoint_sha256'],driver_sha256=file_sha256(__file__),
                 preparation_sha256=file_sha256(condition/'preparation.json'),seed=seed,prompt_key=text_conditioning['prompt_key'],
                 text_conditioning=text_conditioning,
@@ -412,8 +443,9 @@ def generate(*, condition, repository, config, checkpoint, checkpoint_receipt, o
                 conditioning_horizon=sampling_config['conditioning_horizon'],source_time_range_s=sampling_config['source_time_range_s'],
                 camera_design_horizon=sampling_config['camera_design_horizon'],
                 conditioning_mode=conditioning,observed_source_frames=int(known[:,0].sum()),
-                observed_source_time_range_s=sampling_config['observed_source_time_range_s'],strict_forecasting_claim=False,
+                observed_source_time_range_s=sampling_config['observed_source_time_range_s'],strict_forecasting_claim=strict_forecast,
                 source_frames=len(rgb),total_views=4,generated_views=3,observed_extra_views=0,
+                predicted_frames=total_frames,output_modality='RGB only; no native predicted depth exported',
                 supplied_dataset_cameras=calibrated_camera_diagnostic,measured_depth_used=False,simulator_used=False,
                 source_clamp_max_error=final_error,conditional_forward_checks=len(checks),
                 generated_sha256=file_sha256(output/'generated.npz'),observations_sha256=file_sha256(output/'observations.npz'),
@@ -432,6 +464,13 @@ def main():
     prefix=sub.add_parser('prepare-prefix')
     for name in ['condition','output']:prefix.add_argument('--'+name,type=Path,required=True)
     prefix.add_argument('--frames',type=int,default=17)
+    forecast=sub.add_parser('prepare-forecast')
+    for name in ['geometry-bundle','scene-path','scene-manifest','output']:forecast.add_argument('--'+name,type=Path,required=True)
+    for name in ['object-id','task-text','prompt-key']:forecast.add_argument('--'+name,required=True)
+    forecast.add_argument('--frames',type=int,default=17)
+    forecast.add_argument('--dt-s',type=float,required=True,
+                          help='Declared output timestep in seconds; labels predictions, not sampler FPS conditioning')
+    forecast.add_argument('--angle-degrees',type=float,default=20.)
     g=sub.add_parser('generate')
     for name in ['condition','repository','config','checkpoint','checkpoint-receipt','output']:g.add_argument('--'+name,type=Path,required=True)
     g.add_argument('--prompt-key',default='task_0004');g.add_argument('--seed',type=int,default=20261119)
@@ -439,12 +478,13 @@ def main():
     g.add_argument('--null-text',action='store_true',help='Use null text context rather than a cached task prompt; requires text guidance zero')
     g.add_argument('--text-embeddings',type=Path,help='Author-format task/null embedding dictionary; requires a completed receipt')
     g.add_argument('--text-embedding-receipt',type=Path)
-    g.add_argument('--conditioning',choices=['full_source','first_frame_diagnostic'],default='full_source',
+    g.add_argument('--conditioning',choices=['full_source','first_frame_diagnostic','strict_forecast'],default='full_source',
                    help='First-frame diagnostic retains full-clip camera ancestry and is not a strict forecast experiment')
     g.add_argument('--calibrated-camera-diagnostic',action='store_true',
                    help='Explicit supplied-camera diagnostic only; requires calibrated_rgb, first-frame conditioning and guidance 0/0')
     args=vars(p.parse_args());command=args.pop('command')
-    print(json.dumps({'prepare':prepare,'prepare-prefix':prepare_prefix,'generate':generate}[command](**args),indent=2))
+    from benchmarks.strict_forecast import prepare_forecast
+    print(json.dumps({'prepare':prepare,'prepare-prefix':prepare_prefix,'prepare-forecast':prepare_forecast,'generate':generate}[command](**args),indent=2))
 
 
 if __name__=='__main__':main()

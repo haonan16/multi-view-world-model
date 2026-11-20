@@ -43,20 +43,28 @@ and camera requests from the initial image only before making the main claim.
 Custom task-text embeddings are already supported with a verification receipt;
 use a bound task prompt instead of assuming the default cached task matches.
 
-The minimal integration work identified in the code audit is:
+The new [strict forecast adapter](README_strict_forecast.md) implements
+first-image preparation, exact task-embedding binding, and initial-image-only
+scene/camera ancestry checks. Its DA3 path preserves predicted future source
+pixels instead of restoring a recorded clip. CPU integration tests cover these
+boundaries; no GPU forecast or end-to-end execution result is implied.
 
-- Add strict first-image preparation and camera ancestry.
+The remaining integration work is:
+
+- Run the new path using first-image-only estimated geometry and a declared
+  prediction horizon. Verify realized camera differences and task motion before
+  downstream fitting. Nonzero requested camera baselines alone do not prove
+  distinct, accurate views; earlier virtual-camera diagnostics produced near-copies.
 - Wire the intended UGG RGB/depth output. The current `world_model_views.py`
   adapter exports RGB; depth estimated afterward must be labeled as a separate
-  estimator. Mark the generated future source stream as `source_forecast`.
-- Adapt `da3_helper_views.py` before using it on forecasts: its reconstruction
-  path restores recorded source pixels throughout the sequence, whereas future
-  pixels in the main experiment must remain generated predictions.
+  estimator. The strict adapter marks generated future source pixels as
+  `source_forecast` and helper cameras as `helper`.
+- Test predicted depth and metric scale on these generated streams. Unposed DA3
+  Giant leaves scale unresolved per timestamp; the requested-camera variant
+  inherits the initial estimate's scale and camera assumptions.
 - Connect the agent's shared scene/motion to the existing registered planner
   and frozen independent executor. The current planner produces TCP/gripper
   targets; it is not a learned inverse-dynamics model.
-- Verify realized camera differences and task motion before downstream fitting.
-  Nonzero requested camera baselines alone do not prove distinct, accurate views.
 
 These are deployment-time input boundaries. Real sequences and their recorded
 multiview RGB can supply training targets within a separate training split;

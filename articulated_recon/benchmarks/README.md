@@ -12,6 +12,7 @@ plans failed to grasp the object. The world-model-to-successful-execution goal
 has not been demonstrated by these experiments.
 
 - [Protocol and staged comparison matrix](README_protocol.md)
+- [Strict single-image/task forecast adapter and predicted-depth integration](README_strict_forecast.md)
 - [External baseline installation and launch adapters](README_external_baselines.md)
 - [Source-only object initialization](README_source_geometry.md)
 - [Source-only refinement experiments](README_source_refinement.md)
