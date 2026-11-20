@@ -1,0 +1,67 @@
+{
+  "schema": "real-video-selection-v1",
+  "study": "real-video-representation-20261119",
+  "selection_frozen_at_utc": "2026-11-20T02:33:29Z",
+  "condition": "rgb_only",
+  "selection_frozen_before_new_fits": true,
+  "selection_rules": [
+    "Use the two additional fully cached HO-Cap pickup clips named by the November 11 shortlist; do not choose clips from reconstruction results.",
+    "Use recorded camera 117222250549 for every clip, because it is present in all three cached bundles; do not optimize camera choice using geometry scores.",
+    "Keep each existing 120-frame window unchanged, preserve original frame IDs, and use the entire 640 by 480 RGB image without cropping.",
+    "Train on flat box and the reused development bottle; hold out the entire spatula sequence from representation training and model-selection decisions.",
+    "RH20T block is excluded from this split because it is known to occur in world-model training.",
+    "Use only source RGB, nominal timestamps, task labels and source provenance as observed method inputs. Training targets must be model-derived; sensor depth and dataset geometry or calibration are evaluator-only.",
+    "Seal all model variants and their training provenance before evaluating the heldout sequence. Do not return heldout metrics to active fitting or training agents."
+  ],
+  "limitations": [
+    "The historical shortlist and frame windows were annotation-assisted. This is a small, curated feasibility split, not a population-generalization benchmark.",
+    "Bottle is a reused development clip and is training-only here.",
+    "Box and spatula share subject 9, so this split does not establish subject generalization.",
+    "Frame timestamps are nominal original_frame_id / 30 seconds unless original acquisition timestamps are recovered separately; they are not measured sensor clock readings.",
+    "Absence of these HO-Cap clips from any pretrained model's training data has not been established."
+  ],
+  "source_catalog": "research/mano-reconstruction/gallery/external-datasets.json",
+  "archive_prefix": "research/mano-reconstruction/runs/rh20t-browser/mano-shortlist",
+  "evaluator_sampling": "Source-camera depth and labels at all 120 frames; other recorded views at 13 fixed uniform frames (rounded linspace), with calibration and sequence metadata when cached.",
+  "clips": [
+    {
+      "id": "hocap_box",
+      "split": "train",
+      "sequence": "subject_9/20231027_123725",
+      "task_label": "Pick up a flat box",
+      "source_camera": "117222250549",
+      "frame_start": 53,
+      "frame_end": 172,
+      "fps": 30,
+      "image_size": [640, 480],
+      "development_reused": false,
+      "evaluator_cameras": ["105322251564", "043422252387"]
+    },
+    {
+      "id": "hocap_bottle",
+      "split": "train",
+      "sequence": "subject_3/20231024_162756",
+      "task_label": "Pick up a pump bottle",
+      "source_camera": "117222250549",
+      "frame_start": 34,
+      "frame_end": 153,
+      "fps": 30,
+      "image_size": [640, 480],
+      "development_reused": true,
+      "evaluator_cameras": ["115422250549", "043422252387"]
+    },
+    {
+      "id": "hocap_spatula",
+      "split": "heldout",
+      "sequence": "subject_9/20231027_125315",
+      "task_label": "Pick up a spatula",
+      "source_camera": "117222250549",
+      "frame_start": 68,
+      "frame_end": 187,
+      "fps": 30,
+      "image_size": [640, 480],
+      "development_reused": false,
+      "evaluator_cameras": ["108222250342", "105322251564"]
+    }
+  ]
+}

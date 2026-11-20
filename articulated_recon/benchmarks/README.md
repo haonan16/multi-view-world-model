@@ -22,6 +22,9 @@ has not been demonstrated by these experiments.
 - [Matched UniDepth / DA3 Metric experiment](README_depth_comparison.md)
 - [Posthoc sensor-depth and confidence audit](README_confidence_audit.md)
 - [Independent HO-Cap hand, object and camera evaluation](README_hocap_evaluation.md)
+- [Real RGB representation study and training boundary](README_representation_study.md)
+- [Frozen real-video training / held-out split](README_real_video_split.md)
+- [Native Pi4 geometry and motion frontend](README_pi4.md)
 - `rgb_frontend.py`: isolate one recorded RGB camera, then predict metric depth
   and camera intrinsics with an existing local UniDepthV2 checkpoint.
 - `keyframe_compression.py`: compress saved fitted trajectories and measure the
