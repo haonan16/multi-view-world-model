@@ -13,6 +13,12 @@ has not been demonstrated by these experiments.
 
 - [Protocol and staged comparison matrix](README_protocol.md)
 - [Strict single-image/task forecast adapter and predicted-depth integration](README_strict_forecast.md)
+- [Shared block geometry from generated forecast views](README_forecast_geometry.md)
+- [Native SAM3 forecast tracking](README_forecast_tracker.md)
+- [Generated-evidence contact phases](README_forecast_contacts.md)
+- [Four-view and 3D forecast render](README_forecast_render.md)
+- [First-image-only fixed deployment](README_fixed_deployment.md)
+- [Offline replay of frozen native execution](README_registered_replay.md)
 - [External baseline installation and launch adapters](README_external_baselines.md)
 - [Source-only object initialization](README_source_geometry.md)
 - [Source-only refinement experiments](README_source_refinement.md)

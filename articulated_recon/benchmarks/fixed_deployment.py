@@ -47,17 +47,31 @@ def absolute_manifest(path):
     return manifest,report
 
 
-def create(scene_path,input_manifest,source_camera_id,output):
+def create(scene_path,input_manifest,source_camera_id,output,*,first_image_forecast=False):
     output=Path(output).resolve()
     if output.exists():raise FileExistsError(output)
     manifest,report=absolute_manifest(input_manifest)
-    if report['condition']!='rgb_only' or report['task_mode']!='reconstruction':
-        raise ValueError('Current virtual setup is derived from the RGB-only reconstruction baseline')
+    if report['condition']!='rgb_only':
+        raise ValueError('Virtual setup must be derived from RGB-only model estimates')
+    source_image = None
+    if first_image_forecast:
+        # Use the SAME active-lineage and singleton-array checks as the strict
+        # world-model conditioner. A forecast label alone cannot authorize a
+        # scene/camera/depth file that was estimated using later recorded RGB.
+        from benchmarks.strict_forecast import _first_image_manifest
+        _, _, source_image, _, cutoff = _first_image_manifest(input_manifest)
+    elif report['task_mode']!='reconstruction':
+        raise ValueError('Forecast deployment requires explicit first_image_forecast=True')
     scene_path=Path(scene_path).resolve()
     matches=[a['id'] for a in manifest['artifacts'] if a['id'] in report['method_artifact_ids']
              and a['kind']=='object_geometry' and a.get('path')==str(scene_path)]
     if len(matches)!=1:raise ValueError('Bind the actual source initializer as one active object_geometry artifact')
     scene=load_scene(scene_path,require_metric_scale=True)
+    if first_image_forecast and (scene['timestamps'] != [cutoff]
+                                 or scene['coordinate_frame']['name'] != 'source_camera'):
+        raise ValueError('Forecast deployment requires one initial timestamp in source_camera coordinates')
+    if not isinstance(source_camera_id,str) or not source_camera_id.strip():
+        raise ValueError('Declare the source camera identity for independent evaluator conversion')
     transform=virtual_transform(scene)
     deployment={'schema':'deployment-registration-v1','source_frame':'source_camera','target_frame':'panda_base',
         'T_robot_scene':transform.tolist(),'deployment_type':'virtual','fixed_across_methods':True,
@@ -67,7 +81,17 @@ def create(scene_path,input_manifest,source_camera_id,output):
         'measured_physical_calibration':False,'source_initializer_sha256':file_sha256(scene_path),
         'limitations':['Virtual deployment convention, not a claim about a real Panda in the human recording.',
                       'Estimated table orientation/scale errors remain and affect the independent scene.',
-                      'Full-video-derived provenance; cannot be reused as RGB-only first-frame forecasting input.']}
+                      ('First-image-only deployment; no generated future or later recorded frame determines this transform.'
+                       if first_image_forecast else
+                       'Full-video-derived provenance; cannot be reused as RGB-only first-frame forecasting input.')]}
+    if first_image_forecast:
+        deployment.update(initialization_mode='strict_first_image_forecast',
+            source_image_sha256=source_image['sha256'],observed_until_s=cutoff,
+            source_input_manifest_sha256=file_sha256(input_manifest),
+            procedure='One first-image-only RGB initializer defines table-up and initial estimated table foot. '
+                      'Place that foot at Panda workspace x=.45m,y=0; preserve all relative poses and shape. '
+                      'Choose once from the initial image before planning/execution and reuse this exact transform for every forecast method '
+                      'and the independent reference. No generated future or later recorded image is used.')
     output.mkdir(parents=True);path=output/'deployment.json';path.write_text(json.dumps(deployment,indent=2))
     manifest['artifacts'].append({'id':'fixed_deployment','kind':'robot_registration','origin':'model_prediction',
         'parent_ids':matches,'path':str(path),'sha256':file_sha256(path)})
@@ -86,6 +110,8 @@ def attach(method_manifest,deployment_manifest,output):
     deployment,dep_report=absolute_manifest(deployment_manifest)
     if method['task_mode']!=deployment['task_mode']:
         raise ValueError('Do not leak full-video setup into first-frame forecasting')
+    if method['task_mode']=='forecast' and method['observed_until_s']!=deployment['observed_until_s']:
+        raise ValueError('Forecast method and fixed deployment must use the same observed-time cutoff')
     if method['condition']!=deployment['condition']:
         raise ValueError('Deployment and method conditions differ')
     def sources(manifest, report):
@@ -115,6 +141,8 @@ if __name__=='__main__':
     c=subs.add_parser('create')
     for n in ['scene-path','input-manifest','output']:c.add_argument('--'+n,type=Path,required=True)
     c.add_argument('--source-camera-id',required=True)
+    c.add_argument('--first-image-forecast',action='store_true',
+                   help='Require authenticated singleton initial-image ancestry; no full-video or generated-future inputs')
     a=subs.add_parser('attach')
     for n in ['method-manifest','deployment-manifest','output']:a.add_argument('--'+n,type=Path,required=True)
     args=vars(p.parse_args());command=args.pop('command');print(json.dumps((create if command=='create' else attach)(**args),indent=2))

@@ -138,7 +138,61 @@ def _grasp_interval(scene, object_id):
     return contact
 
 
-def build_plan(scene, registration, config, *, external_vertices=None):
+def _pose_evidence(obj, times, task_mode, observed_until_s):
+    """Keep recorded observations distinct from supported model forecasts."""
+    observed = np.asarray(obj['observed'], bool)
+    predicted = np.zeros(len(times), bool)
+    if task_mode == 'reconstruction':
+        return observed, predicted
+    if task_mode != 'forecast':
+        raise PlanError('Unknown planning task mode')
+    if (not isinstance(observed_until_s, (int, float)) or isinstance(observed_until_s, bool)
+            or not np.isfinite(observed_until_s)):
+        raise PlanError('Forecast planning requires a finite observed-time cutoff')
+    future = times > observed_until_s
+    if times[0] != observed_until_s or np.count_nonzero(~future) != 1 or not observed[0]:
+        raise PlanError('Strict forecast plan requires one observed initial object pose at the cutoff')
+    if observed[future].any():
+        raise PlanError('Generated future poses must not be relabeled as recorded observations')
+    raw = np.asarray(obj.get('prediction_supported'))
+    if raw.dtype.kind != 'b' or raw.shape != times.shape:
+        raise PlanError('Forecast requires a complete boolean prediction_supported array')
+    if raw[~future].any():
+        raise PlanError('prediction_supported may be used only after the observed-time cutoff')
+    provenance = obj.get('prediction_provenance')
+    if (not isinstance(provenance, dict) or provenance.get('origin') != 'model_prediction'
+            or provenance.get('generated') is not True
+            or not isinstance(provenance.get('method'), str) or not provenance['method'].strip()
+            or not isinstance(provenance.get('artifact_ids'), list) or not provenance['artifact_ids']
+            or any(not isinstance(x, str) or not x for x in provenance['artifact_ids'])):
+        raise PlanError('Forecast pose support requires explicit generated-model provenance and artifact IDs')
+    return observed, raw.copy()
+
+
+def _forecast_lineage(obj, times, predicted, active):
+    """Bind claimed future support to actual consumed generated RGB ancestry."""
+    ids = obj['prediction_provenance']['artifact_ids']
+    if any(aid not in active for aid in ids):
+        raise ProtocolError('Forecast pose provenance references an inactive or missing artifact')
+    closure, todo = set(), list(ids)
+    while todo:
+        aid = todo.pop()
+        if aid in closure:
+            continue
+        if aid not in active:
+            raise ProtocolError('Forecast pose ancestry is not an active method dependency')
+        closure.add(aid)
+        todo.extend(active[aid]['parent_ids'])
+    ranges = [a['time_range_s'] for aid, a in active.items() if aid in closure
+              and a['kind'] == 'rgb' and a['origin'] == 'model_prediction'
+              and a.get('generated') is True and 'time_range_s' in a]
+    for t in times[predicted]:
+        if not any(low <= t <= high for low, high in ranges):
+            raise ProtocolError('Forecast pose lacks generated RGB ancestry covering its timestamp')
+
+
+def build_plan(scene, registration, config, *, external_vertices=None,
+               task_mode='reconstruction', observed_until_s=None):
     """Pure TCP compilation. All object positions change only by registration."""
     validate_scene(scene, require_metric_scale=True)
     _config(config)
@@ -150,11 +204,12 @@ def build_plan(scene, registration, config, *, external_vertices=None):
     grasp = _grasp_interval(scene, obj["id"])
     start, end = grasp["start_frame"], grasp["end_frame"]
     times = np.asarray(scene["timestamps"], float)
+    observed, predicted = _pose_evidence(obj, times, task_mode, observed_until_s)
     poses = transform @ np.asarray(obj["T_world_object"], float)
     release = end < len(times) - 1
     last = end + int(release)
-    if not np.asarray(obj["observed"], bool)[:last + 1].all():
-        raise PlanError("Unobserved object poses occur in the plan's required prefix")
+    if not (observed | predicted)[:last + 1].all():
+        raise PlanError("Unobserved or unsupported predicted object poses occur in the plan's required prefix")
     if release:
         support_id = scene["support"]["id"] if scene["support"] is not None else None
         supports = [c for c in scene["contacts"] if c["kind"] == "support"
@@ -262,6 +317,7 @@ def build_plan(scene, registration, config, *, external_vertices=None):
                   phase=np.array(phases), duration_s=np.array(durations), command_time_s=np.cumsum(durations),
                   source_time_s=np.array(source_times), source_time_valid=np.array(source_valid),
                   T_robot_object=poses, object_times_s=times,
+                  object_observed=observed, object_prediction_supported=predicted,
                   T_object_tcp=relative, goal_pose=poses[last])
     report = dict(schema="registered-tcp-plan-v1", coordinate_frame=registration["target_frame"],
                   object_id=obj["id"], object_geometry_replaced=False, object_pose_corrections_m=0.,
@@ -281,6 +337,11 @@ def build_plan(scene, registration, config, *, external_vertices=None):
                                "Object motion is preserved at source timestamps; segments may slow down to fixed speed limits.",
                                "source_time_valid=false marks synthetic approach/retreat; its -1 timestamp is a placeholder."],
                   simulator_feedback_used=False, simulator_accessed=False, inverse_dynamics_used=False)
+    report['task_mode'] = task_mode
+    report['object_pose_evidence'] = dict(observed=observed.tolist(), prediction_supported=predicted.tolist(),
+        observed_until_s=observed_until_s if task_mode == 'forecast' else None,
+        prediction_provenance=obj.get('prediction_provenance') if task_mode == 'forecast' else None,
+        interpretation='observed denotes recorded evidence; prediction_supported denotes model-generated evidence, not ground truth')
     return arrays, report
 
 
@@ -330,7 +391,12 @@ def produce_plan(*, scene_path, input_manifest, registration_id, config_path, ou
         else:
             import trimesh
             vertices = np.asarray(trimesh.load(mesh, process=False, force="mesh").vertices)
-    arrays, report = build_plan(scene, registration, config, external_vertices=vertices)
+    if protocol['task_mode'] == 'forecast' and len(objects) == 1:
+        times = np.asarray(scene['timestamps'], float)
+        _, predicted = _pose_evidence(objects[0], times, 'forecast', manifest.get('observed_until_s'))
+        _forecast_lineage(objects[0], times, predicted, active)
+    arrays, report = build_plan(scene, registration, config, external_vertices=vertices,
+        task_mode=protocol['task_mode'], observed_until_s=manifest.get('observed_until_s'))
     output.mkdir(parents=True)
     plan = output / "plan.npz"
     np.savez_compressed(plan, **arrays)

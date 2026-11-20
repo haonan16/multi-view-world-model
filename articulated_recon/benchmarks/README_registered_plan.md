@@ -8,7 +8,7 @@ evaluator scene is accepted as an input.
 ## Required inputs
 
 - A validated shared scene with estimated metric scale, one shared object
-  geometry, observed rigid poses, and one explicit continuous grasp interval.
+  geometry, supported rigid poses, and one explicit continuous grasp interval.
   A grasp ending before the clip ends additionally requires a table-support
   interval at the first released frame. Unknown or disjoint grasp state is
   rejected; the adapter never fills a first-to-last grasp through missing events.
@@ -80,6 +80,38 @@ registration and plan hashes; it can be passed to `freeze_submission.py` with
 the actual planner file and a controller targeting the same robot frame.
 Sealing binds these inputs before evaluator attachment. It does not validate
 IK, dynamics, command compatibility or execution success.
+
+For strict single-image forecasts, `compile` takes the mode and observed-time
+cutoff from the validated input manifest. The object retains
+`observed=[true,false,...]`: generated future evidence is never relabeled as
+recorded observations. It must additionally supply:
+
+```json
+{
+  "prediction_supported": [false, true, true],
+  "prediction_provenance": {
+    "origin": "model_prediction",
+    "generated": true,
+    "method": "Object poses estimated from generated future RGB and predicted depth",
+    "artifact_ids": ["forecast_depth"]
+  }
+}
+```
+
+Both arrays span the full scene timeline. Only the first timestamp may be
+observed, and only later timestamps may use `prediction_supported`. The
+referenced artifacts must be active consumed dependencies with generated RGB
+ancestry covering the supported future timestamps. Missing generated geometry
+remains unsupported and causes rejection if the plan needs it. The ordinary
+reconstruction mode cannot use these flags to bypass missing observations.
+Contact, support, gripper-width, pregrasp-motion and penetration checks are
+unchanged. Predicted contact intervals are hypotheses, not physical evidence.
+
+`plan.npz` stores `object_observed` and `object_prediction_supported` separately;
+the metadata repeats them with the cutoff and prediction provenance. Its
+`source_time_valid` array means the command has a scene-timeline timestamp, not
+that the corresponding image was observed. Use a new first-image-only
+[fixed deployment](README_fixed_deployment.md) for this mode.
 
 The API and its tests use synthetic array fixtures. Running those tests is not
 a new result on the block or bottle demonstrations.

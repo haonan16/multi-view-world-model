@@ -194,3 +194,125 @@ def test_tampered_calibration_rejected_before_plan(tmp_path):
     with pytest.raises(ProtocolError):
         planner.produce_plan(scene_path=source, input_manifest=manifest, registration_id="registration", config_path=config, output=tmp_path / "plan")
     assert not (tmp_path / "plan").exists()
+
+
+def forecast_scene():
+    source=scene()
+    obj=source['objects'][0]
+    obj['observed']=[True,False,False,False,False]
+    obj['prediction_supported']=[False,True,True,True,True]
+    obj['prediction_provenance']={'origin':'model_prediction','generated':True,
+        'artifact_ids':['depth'],'method':'Synthetic depth fitted to generated future RGB'}
+    return source
+
+
+def test_supported_forecast_preserves_recorded_vs_predicted_flags():
+    source=forecast_scene();original=deepcopy(source)
+    arrays,report=planner.build_plan(source,registration(),planner.default_config('block'),
+                                     task_mode='forecast',observed_until_s=7.)
+    assert source==original
+    assert arrays['object_observed'].tolist()==[True,False,False,False,False]
+    assert arrays['object_prediction_supported'].tolist()==[False,True,True,True,True]
+    assert report['task_mode']=='forecast'
+    assert report['object_pose_evidence']['observed_until_s']==7.
+    expected=np.asarray(registration()['T_robot_scene'])@np.asarray(source['objects'][0]['T_world_object'])
+    np.testing.assert_allclose(arrays['T_robot_object'],expected)
+    # The robot commands are unchanged by evidence labels; observations are not
+    # relabeled to make the existing physical guards accept generated futures.
+    recorded,_=planner.build_plan(scene(),registration(),planner.default_config('block'))
+    np.testing.assert_allclose(arrays['T_robot_tcp'],recorded['T_robot_tcp'])
+
+
+@pytest.mark.parametrize('mutation,message',[
+    (lambda o:o.pop('prediction_supported'),'complete boolean'),
+    (lambda o:o.__setitem__('prediction_supported',[0,1,1,1,1]),'complete boolean'),
+    (lambda o:o.__setitem__('prediction_supported',[False,True]),'complete boolean'),
+    (lambda o:o['prediction_supported'].__setitem__(0,True),'only after'),
+    (lambda o:o['prediction_supported'].__setitem__(2,False),'unsupported predicted'),
+    (lambda o:o['observed'].__setitem__(2,True),'relabeled'),
+    (lambda o:o['observed'].__setitem__(0,False),'initial object pose'),
+    (lambda o:o.pop('prediction_provenance'),'explicit generated'),
+    (lambda o:o['prediction_provenance'].__setitem__('generated',False),'explicit generated'),
+    (lambda o:o['prediction_provenance'].__setitem__('artifact_ids',[]),'explicit generated'),
+])
+def test_forecast_missing_or_misdeclared_evidence_is_rejected(mutation,message):
+    source=forecast_scene();mutation(source['objects'][0])
+    with pytest.raises(planner.PlanError,match=message):
+        planner.build_plan(source,registration(),planner.default_config('block'),
+                           task_mode='forecast',observed_until_s=7.)
+
+
+def test_reconstruction_cannot_use_prediction_flags_to_fill_observation_gap():
+    with pytest.raises(planner.PlanError,match='Unobserved'):
+        planner.build_plan(forecast_scene(),registration(),planner.default_config('block'))
+
+
+@pytest.mark.parametrize('cutoff',[None,True,float('nan'),6.,7.13])
+def test_forecast_requires_actual_single_image_cutoff(cutoff):
+    with pytest.raises(planner.PlanError):
+        planner.build_plan(forecast_scene(),registration(),planner.default_config('block'),
+                           task_mode='forecast',observed_until_s=cutoff)
+
+
+@pytest.mark.parametrize('mutation,message',[
+    (lambda s:s['contacts'].pop(),'supported release'),
+    (lambda s:s['objects'][0]['T_world_object'][3][2].__setitem__(3,-.01),'penetrates'),
+    (lambda s:s['objects'][0]['T_world_object'][1][0].__setitem__(3,.2),'moves before'),
+])
+def test_forecast_keeps_contact_support_and_stationary_prefix_guards(mutation,message):
+    source=forecast_scene();mutation(source)
+    with pytest.raises(planner.PlanError,match=message):
+        planner.build_plan(source,registration(),planner.default_config('block'),
+                           task_mode='forecast',observed_until_s=7.)
+
+
+def forecast_inputs(tmp_path):
+    source,manifest_path,config=materialized_inputs(tmp_path)
+    write(source,forecast_scene())
+    manifest=json.loads(manifest_path.read_text())
+    manifest.update(task_mode='forecast',observed_until_s=7.)
+    manifest['artifacts'][0]['time_range_s']=[7.,7.]
+    future=tmp_path/'future.dat';future.write_text('Synthetic generated future RGB')
+    manifest['artifacts'].append(dict(id='future_rgb',kind='rgb',origin='model_prediction',
+        generated=True,parent_ids=['rgb','weights'],path=future.name,sha256=file_sha256(future),
+        time_range_s=[7.13,8.23]))
+    next(a for a in manifest['artifacts'] if a['id']=='depth')['parent_ids'].append('future_rgb')
+    # Registration stays anchored to initial RGB, never the future depth track.
+    next(a for a in manifest['artifacts'] if a['id']=='registration')['parent_ids']=['rgb']
+    write(manifest_path,manifest)
+    return source,manifest_path,config
+
+
+def test_compile_uses_manifest_forecast_mode_and_authenticates_future_lineage(tmp_path):
+    source,manifest,config=forecast_inputs(tmp_path)
+    report=planner.produce_plan(scene_path=source,input_manifest=manifest,registration_id='registration',
+                                config_path=config,output=tmp_path/'plan')
+    assert report['task_mode']=='forecast'
+    assert report['object_pose_evidence']['observed']==[True,False,False,False,False]
+    assert report['object_pose_evidence']['prediction_supported']==[False,True,True,True,True]
+    executor=tmp_path/'executor-placeholder.py';executor.write_text('# Synthetic seal only')
+    controller=write(tmp_path/'controller.json',{'target_frame':'robot_base'})
+    sealed=freeze_submission(scene=source,input_manifest=manifest,plan=tmp_path/'plan/plan.npz',
+        plan_metadata=tmp_path/'plan/plan-metadata.json',planner=planner.__file__,executor=executor,
+        controller_config=controller,output=tmp_path/'forecast-seal.json')
+    assert sealed['input_protocol']['task_mode']=='forecast'
+    assert verify_submission(tmp_path/'forecast-seal.json')==sealed
+
+
+@pytest.mark.parametrize('part',['missing_id','initial_depth_only','short_horizon'])
+def test_compile_rejects_prediction_claims_without_consumed_future_rgb(tmp_path,part):
+    source,manifest_path,config=forecast_inputs(tmp_path)
+    if part=='missing_id':
+        value=json.loads(source.read_text());value['objects'][0]['prediction_provenance']['artifact_ids']=['unknown']
+        write(source,value)
+    else:
+        manifest=json.loads(manifest_path.read_text())
+        if part=='initial_depth_only':
+            next(a for a in manifest['artifacts'] if a['id']=='depth')['parent_ids'].remove('future_rgb')
+        else:
+            next(a for a in manifest['artifacts'] if a['id']=='future_rgb')['time_range_s'][1]=8.1
+        write(manifest_path,manifest)
+    with pytest.raises(ProtocolError,match='Forecast pose'):
+        planner.produce_plan(scene_path=source,input_manifest=manifest_path,registration_id='registration',
+                             config_path=config,output=tmp_path/'plan')
+    assert not (tmp_path/'plan').exists()
