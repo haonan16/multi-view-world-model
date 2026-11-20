@@ -31,6 +31,38 @@ Transformers 5.8.0. Models/processors load from that local snapshot with
 `propagate_in_video_iterator`. Source/helper streams never share a tracker
 session or memory.
 
+An explicit optional source-seed variant adds
+`--source-association-config /path/initial-scene/initializer-config.json`.
+It recomputes `source_geometry_v2.associate_masks` on the single native source
+image's SAM3 candidates. Its fixed heuristic combines detector score, relative
+mask area and overlap with the predicted table's image bounding box; the
+temporal continuity term is zero for this singleton input. It accepts a winner
+only when the saved configuration's margin separates the candidates. Missing
+or ambiguous cases stay unsupported. This is a task-selection hypothesis,
+not ground truth. It never reads a saved selected row, initial fitted geometry,
+depth or future image to decide the seed. Config and selector-code hashes,
+all candidate scores, the actual margin and selected row are recorded. Helper
+views keep the original unique-candidate rule. Without this flag, the original
+source policy is unchanged.
+
+`--helper-seed-transport` replaces the helper's independent candidate choice
+with automatic first-frame source-to-helper mask transport. Mutual SIFT matches
+(ratio 0.75) and a 3-pixel RANSAC homography use source background outside all
+predicted object/hand masks with a four-pixel margin. The transported mask is
+a **background-plane correspondence hypothesis**: object parallax, generated
+distortion and hallucinations can still make it wrong. It uses neither requested
+camera matrices nor later frames nor simulator information.
+
+Fixed gates require at least 12 inliers, 35% inlier fraction, broadly distributed
+source/target matches, median reprojection error ≤2px, 90th percentile ≤3.5px,
+at least three inliers within 40px of the source block, and no more than 8px
+extrapolation outside the source inlier hull. Projected area must remain within
+0.25–4× its source area and contain at least 12 pixels. Failed correspondence
+leaves the helper unsupported; it does not fall back to an unrelated detection.
+All thresholds, homographies, error measures and seed centers are recorded.
+Helpers still have independent video memories after seeding; cross-view object
+identity is estimated, not verified. Source-only output ancestry stays unchanged.
+
 The output retains native full-resolution mask logits and object-presence
 logits in `tracker-logits.npz`. Default gates are mask logit > 0, sigmoid object
 presence > 0.5, and at least 12 mask pixels. Occluded/absent/small predictions

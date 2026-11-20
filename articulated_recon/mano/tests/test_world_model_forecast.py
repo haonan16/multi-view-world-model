@@ -87,6 +87,24 @@ def test_forecast_cadence_has_no_implicit_default(tmp_path):
     with pytest.raises(TypeError, match='dt_s'): sf.prepare_forecast(**args)
 
 
+def test_camera_recreation_allows_only_float64_roundoff():
+    expected=dict(c2w=np.tile(np.eye(4),(4,1,1)),rgb=np.zeros((1,2,2,3),np.uint8),
+                  K=np.eye(3),timestamps=np.array([0.,1.]),source_frame_indices=np.array([0,-1]))
+    actual=deepcopy(expected)
+    for _ in range(3):actual['c2w'][3,0,0]=np.nextafter(actual['c2w'][3,0,0],np.inf)
+    report=sf.verify_condition_arrays(actual,expected)
+    assert report['camera_recreation']['max_float64_spacing_units']==3
+    assert report['non_camera_arrays_exact'] is True
+    for field in ['c2w','K','rgb','timestamps','source_frame_indices']:
+        changed=deepcopy(expected)
+        changed[field].flat[0]+=1e-8 if changed[field].dtype.kind=='f' else 1
+        with pytest.raises(ValueError):sf.verify_condition_arrays(changed,expected)
+    changed=deepcopy(expected);changed['c2w']=changed['c2w'].astype(np.float32)
+    with pytest.raises(ValueError):sf.verify_condition_arrays(changed,expected)
+    changed=deepcopy(expected);changed['c2w'][0,0,1]=1e-30
+    with pytest.raises(ValueError):sf.verify_condition_arrays(changed,expected)
+
+
 @pytest.mark.parametrize('part', ['source', 'depth', 'scene', 'camera', 'mode', 'future_ancestor'])
 def test_reject_later_frames_even_if_outer_manifest_is_relabeled(tmp_path, part):
     args, rgb = fixture_inputs(tmp_path); root = args['geometry_bundle']

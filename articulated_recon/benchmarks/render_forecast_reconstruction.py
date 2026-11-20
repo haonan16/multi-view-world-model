@@ -24,8 +24,6 @@ from artirecon.input_protocol import file_sha256,load_manifest
 from artirecon.scene_sequence import load_scene
 from representation_agent_tools import geometry_arrays,raster_depth
 
-SIGNS=np.asarray([[x,y,z] for x in [-1,1] for y in [-1,1] for z in [-1,1]],float)
-EDGES=[(a,b) for a in range(8) for b in range(a+1,8) if np.sum(SIGNS[a]!=SIGNS[b])==1]
 GOLD=(246,182,68)
 
 
@@ -71,10 +69,16 @@ def project(points,k,camera):
     return image[:,:2]/np.maximum(image[:,2,None],1e-8),local[:,2]
 
 
-def wireframe(image,corners,k,camera,color=GOLD,width=2):
-    result=image.copy();uv,z=project(corners,k,camera)
+def mesh_edges(faces):
+    faces=np.asarray(faces,int)
+    return np.unique(np.sort(np.concatenate([faces[:,[0,1]],faces[:,[1,2]],faces[:,[2,0]]]),axis=1),axis=0)
+
+
+def wireframe(image,vertices,edges,k,camera,color=GOLD,width=2):
+    """Draw the supplied mesh's edges, never a substitute bounding box."""
+    result=image.copy();uv,z=project(vertices,k,camera)
     if not np.isfinite(uv).all():return result
-    for a,b in EDGES:
+    for a,b in edges:
         if z[a]>.001 and z[b]>.001 and np.max(np.abs(uv[[a,b]]))<1e6:
             cv2.line(result,tuple(np.rint(uv[a]).astype(int)),tuple(np.rint(uv[b]).astype(int)),color,width,cv2.LINE_AA)
     return result
@@ -89,12 +93,14 @@ def look_at(eye,target,up):
 
 
 def display_geometry(scene,obj):
-    poses=np.asarray(obj['T_world_object']);half=np.asarray(obj['geometry']['half_extents_m'])
+    poses=np.asarray(obj['T_world_object']);vertices,faces=geometry_arrays(obj['geometry'])
+    low,high=vertices.min(0),vertices.max(0);extent=high-low;centre=(low+high)/2
     supported=np.asarray(obj['observed'],bool)|np.asarray(obj.get('prediction_supported',np.zeros(len(poses))),bool)
-    centres=poses[supported,:3,3]
+    all_centres=np.einsum('tij,j->ti',poses[:,:3,:3],centre)+poses[:,:3,3]
+    centres=all_centres[supported]
     if not len(centres):raise ValueError('No supported observed/predicted object pose for display')
     target=np.mean(centres,axis=0)
-    radius=max(.15,float(np.linalg.norm(centres-target,axis=1).max()+np.linalg.norm(half)*2.5))
+    radius=max(.15,float(np.linalg.norm(centres-target,axis=1).max()+np.linalg.norm(extent/2)*2.5))
     support=scene['support'];up=np.asarray(support['normal_world'] if support else [0,-1,0],float)
     up/=np.linalg.norm(up)
     front=-target+up*np.dot(target,up)
@@ -106,7 +112,8 @@ def display_geometry(scene,obj):
         centre=target-(target@up+support['offset_m'])*up
         plane=dict(centre=centre,up=up,u=front,v=side,half_extent=radius*1.2)
     return dict(target=target,radius=radius,up=up,front=front,side=side,plane=plane,
-                poses=poses,half=half,supported=supported)
+                poses=poses,centres=all_centres,vertices=vertices,faces=faces,edges=mesh_edges(faces),
+                local_aabb_extent=extent,geometry_type=obj['geometry']['type'],supported=supported)
 
 
 def predicted_cloud(arrays,index,display,max_points=5000):
@@ -160,27 +167,36 @@ def orbit_panel(display,points,colors,pose,progress,size,orbit_degrees=90):
             p=pixel+[dx,dy];inside=(p[:,0]<w)&(p[:,1]<h)
             image[p[inside,1],p[inside,0]]=np.maximum(color[inside],42)
             zbuffer[p[inside,1],p[inside,0]]=z[inside]
-    centres=display['poses'][:,:3,3]
+    centres=display['centres']
     uv,z=project(centres,k,camera)
     for t in range(len(centres)-1):
         if display['supported'][t] and display['supported'][t+1] and min(z[t],z[t+1])>0:
             cv2.line(image,tuple(np.rint(uv[t]).astype(int)),tuple(np.rint(uv[t+1]).astype(int)),(90,190,220),2,cv2.LINE_AA)
     if pose is not None:
-        vertices,faces=geometry_arrays(dict(type='box',half_extents_m=display['half']))
+        vertices,faces=display['vertices'],display['faces']
         world=vertices@pose[:3,:3].T+pose[:3,3]
-        for face in range(0,len(faces),2):
-            face_depth=raster_depth(world,faces[face:face+2],k,camera,(h,w))
+        for face in range(len(faces)):
+            face_depth=raster_depth(world,faces[face:face+1],k,camera,(h,w))
             normal=np.cross(world[faces[face,1]]-world[faces[face,0]],world[faces[face,2]]-world[faces[face,0]])
             normal/=max(np.linalg.norm(normal),1e-12)
             shade=.55+.4*abs(normal@camera[:3,2])
             drawn=(face_depth>0)&(face_depth<zbuffer+.003)
             image[drawn]=np.asarray(GOLD)*shade;zbuffer[drawn]=face_depth[drawn]
-        corners=(SIGNS*display['half'])@pose[:3,:3].T+pose[:3,3]
-        image=wireframe(image,corners,k,camera,(255,206,113),1)
+        image=wireframe(image,world,display['edges'],k,camera,(255,206,113),1)
     return image
 
 
-def load_inputs(helper,bundle):
+def task_object(scene,object_id=None):
+    if object_id is not None:
+        matches=[obj for obj in scene['objects'] if obj['id']==object_id]
+        if len(matches)!=1:raise ValueError('Requested task object is missing or ambiguous: '+object_id)
+        return matches[0]
+    if len(scene['objects'])!=1:
+        raise ValueError('Supply --object-id when the scene contains multiple objects')
+    return scene['objects'][0]
+
+
+def load_inputs(helper,bundle,object_id=None):
     helper,bundle=Path(helper).resolve(),Path(bundle).resolve()
     hr=load_manifest(helper/'input-manifest.json',[('rgb',helper/'observations.npz')])
     br=load_manifest(bundle/'input-manifest.json',[('object_geometry',bundle/'scene-sequence.json'),
@@ -202,7 +218,7 @@ def load_inputs(helper,bundle):
     generated=[a for a in json.loads((bundle/'input-manifest.json').read_text())['artifacts']
         if a['id'] in br['method_artifact_ids'] and a.get('generated') is True and a.get('sha256')==file_sha256(helper/'observations.npz')]
     if not generated:raise ValueError('Provided generated views are not the fitted forecast ancestry')
-    obj=next(o for o in scene['objects'] if o['geometry']['type']=='box')
+    obj=task_object(scene,object_id if object_id is not None else receipt.get('object_id'))
     return source,arrays,scene,obj,receipt
 
 
@@ -216,8 +232,8 @@ def ffmpeg_executable():
 
 
 def render(*,helper,bundle,output,fps=30,initial_hold_s=.5,final_hold_s=.5,
-           interpolate_3d=True,panel_width=384,orbit_degrees=90.,max_points=5000):
-    source,arrays,scene,obj,fit_receipt=load_inputs(helper,bundle)
+           interpolate_3d=True,panel_width=384,orbit_degrees=90.,max_points=5000,object_id=None):
+    source,arrays,scene,obj,fit_receipt=load_inputs(helper,bundle,object_id)
     output=Path(output).resolve()
     if output.exists():raise FileExistsError(output)
     if panel_width<160 or max_points<1:raise ValueError('Invalid display dimensions/point budget')
@@ -236,12 +252,12 @@ def render(*,helper,bundle,output,fps=30,initial_hold_s=.5,final_hold_s=.5,
     clouds=[predicted_cloud(arrays,t,display,max_points) for t in range(len(times))]
     native_tiles=[]
     for t in range(len(times)):
-        tiles=[];pose=display['poses'][t];corners=(SIGNS*display['half'])@pose[:3,:3].T+pose[:3,3]
+        tiles=[];pose=display['poses'][t];vertices=display['vertices']@pose[:3,:3].T+pose[:3,3]
         for v in range(4):
             picture=rgb[t,v].copy()
             has_camera=v<arrays['K'].shape[1]
             if display['supported'][t] and has_camera:
-                marked=wireframe(picture,corners,arrays['K'][t,v],arrays['c2w'][t,v])
+                marked=wireframe(picture,vertices,display['edges'],arrays['K'][t,v],arrays['c2w'][t,v])
                 if 'occlusion_mask' in arrays:marked[arrays['occlusion_mask'][t,v]]=picture[arrays['occlusion_mask'][t,v]]
                 picture=marked
             image=Image.fromarray(picture).resize((panel_width,image_h),Image.Resampling.LANCZOS)
@@ -265,9 +281,9 @@ def render(*,helper,bundle,output,fps=30,initial_hold_s=.5,final_hold_s=.5,
                 orbit_x=margin+left_w+gap;canvas.paste(Image.fromarray(orbit),(orbit_x,top+26))
                 draw.rectangle((orbit_x,top,orbit_x+orbit_w,top+26),fill=(30,37,47))
                 draw.text((orbit_x+8,top+5),'3D estimate · display orbit',font=small_font,fill=(225,232,240))
-                dimensions=' × '.join(f'{x:.1f}' for x in display['half']*200)
-                draw.text((orbit_x+10,top+body_h-65),'Box estimate: '+dimensions+' cm',font=small_font,fill=(215,226,239))
-                scene_label='Predicted points · shared box · '+('estimated plane' if display['plane'] is not None else 'metric track')
+                dimensions=' × '.join(f'{x:.1f}' for x in display['local_aabb_extent']*100)
+                draw.text((orbit_x+10,top+body_h-65),'Local bounds: '+dimensions+' cm',font=small_font,fill=(215,226,239))
+                scene_label='Predicted points · shared '+display['geometry_type']+' · '+('estimated plane' if display['plane'] is not None else 'metric track')
                 draw.text((orbit_x+10,top+body_h-45),scene_label,font=small_font,fill=(215,226,239))
                 draw.text((orbit_x+10,top+body_h-25),pose_status+'; cloud held at native frame',font=small_font,fill=GOLD)
                 native_elapsed=times[native]-times[0]
@@ -299,7 +315,11 @@ def render(*,helper,bundle,output,fps=30,initial_hold_s=.5,final_hold_s=.5,
         display_orbit_degrees=orbit_degrees,point_cloud='Predicted depth lifted with fitted cameras; interaction-region display crop',
         point_count_per_native_frame=[len(x[0]) for x in clouds],
         table='Estimated infinite plane; finite patch drawn only for display' if display['plane'] is not None else 'No support plane supplied or drawn',
-        object_dimensions_m=(2*display['half']).tolist(),hand_mesh_present=False,GT_used=False,simulator_used=False,
+        object_id=obj['id'],object_geometry_type=display['geometry_type'],
+        object_vertices=len(display['vertices']),object_faces=len(display['faces']),
+        object_dimensions_m=display['local_aabb_extent'].tolist(),object_dimensions_scope='Local AABB for labels and camera framing only',
+        geometry_rendering='Actual geometry_arrays vertices/faces for surface rasterization and triangle-edge overlays; no box coercion',
+        hand_mesh_present=False,GT_used=False,simulator_used=False,
         branch=fit_receipt['branch'],scene_sha256=file_sha256(Path(bundle)/'scene-sequence.json'),
         helper_sha256=file_sha256(Path(helper)/'observations.npz'),producer_sha256=file_sha256(__file__))
     (output/'render-receipt.json').write_text(json.dumps(report,indent=2,allow_nan=False)+'\n')
@@ -313,6 +333,7 @@ def main():
     p.add_argument('--final-hold-s',type=float,default=.5);p.add_argument('--no-interpolate-3d',action='store_true')
     p.add_argument('--panel-width',type=int,default=384);p.add_argument('--orbit-degrees',type=float,default=90.)
     p.add_argument('--max-points',type=int,default=5000)
+    p.add_argument('--object-id',help='Task object ID; required for multi-object scenes unless the receipt declares it')
     args=vars(p.parse_args());args['interpolate_3d']=not args.pop('no_interpolate_3d')
     print(json.dumps(render(**args),indent=2))
 

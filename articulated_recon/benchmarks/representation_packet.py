@@ -42,7 +42,7 @@ def cameras_per_frame(data, key, count, views, size, allow_nonfinite=False):
     return value
 
 
-def normalize_observations(data):
+def normalize_observations(data, task_mode='reconstruction'):
     """Normalize dynamic predicted cameras without changing their gauge/scale."""
     rgb = np.asarray(data['rgb'])
     depth = np.asarray(data['depth_m'], dtype=float)
@@ -53,7 +53,7 @@ def normalize_observations(data):
     if rgb.ndim != 5 or rgb.shape[-1] != 3 or rgb.dtype != np.uint8 or depth.shape != rgb.shape[:-1]:
         raise ValueError('Expected uint8 RGB[T,V,H,W,3] and predicted depth[T,V,H,W]')
     count, views, height, width = depth.shape
-    if views != 1:
+    if views != 1 and not (task_mode=='forecast' and views==4):
         raise ValueError('This source-only comparison currently accepts exactly one observed view')
     times = np.asarray(data['timestamps'], dtype=float)
     if times.shape != (count,) or not np.isfinite(times).all() or not (np.diff(times) > 0).all():
@@ -98,7 +98,14 @@ def normalize_observations(data):
                 depth_valid=valid, points_world=points, object_masks=masks,
                 object_mask_known=known, occlusion_mask=occ, camera_projection_valid=k_valid)
     frame_ids = np.asarray(data.get('source_frame_indices', np.arange(count)))
-    if (frame_ids.shape != (count,) or frame_ids.dtype.kind not in 'iu'
+    if task_mode=='forecast':
+        if not np.array_equal(frame_ids,np.r_[0,np.full(count-1,-1)]):
+            raise ValueError('Forecast source indices must be 0 then -1 for generated frames')
+        known=np.zeros((count,views),bool);known[0,0]=True
+        if not np.array_equal(data.get('observed_mask'),known):
+            raise ValueError('Only the initial source image may be observed')
+        result['observed_mask']=known
+    elif (frame_ids.shape != (count,) or frame_ids.dtype.kind not in 'iu'
             or (frame_ids < 0).any() or not (np.diff(frame_ids) > 0).all()):
         raise ValueError('source_frame_indices must identify strictly increasing original source frames')
     result['source_frame_indices'] = frame_ids.copy()

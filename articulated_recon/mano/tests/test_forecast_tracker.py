@@ -120,6 +120,118 @@ def test_ambiguous_seed_is_not_selected_by_score():
     assert seed.sum()==16 and report['selected_row']==0
 
 
+def association_fixture(tmp_path,scores=(.9,.4)):
+    args,rgb,_=fixture(tmp_path)
+    masks=np.zeros((2,12,16),bool);masks[0,2:6,2:6]=True;masks[1,7:11,10:14]=True
+    path=args['initial_masks']/'masks.npz'
+    data=ft.arrays(path)
+    data.update(mask=np.packbits(masks.reshape(2,-1),axis=1),score=np.asarray(scores,np.float32),
+                box=np.array([[2,2,5,5],[10,7,13,10]],np.float32),t=np.zeros(2,int),p=np.zeros(2,int),
+                prompts=np.asarray([ft.OBJECT_PROMPT,'hand','tabletop']))
+    np.savez(path,**data)
+    manifest_path=args['initial_masks']/'input-manifest.json';manifest=json.loads(manifest_path.read_text())
+    manifest['artifacts'][-1]['sha256']=file_sha256(path);manifest_path.write_text(json.dumps(manifest))
+    from benchmarks.source_geometry_v2 import default_config
+    config=tmp_path/'initializer-config.json';config.write_text(json.dumps(default_config()))
+    return args,rgb,masks,config
+
+
+def test_optional_source_association_recomputes_initial_mask_only_and_records_margin(tmp_path):
+    args,rgb,masks,config=association_fixture(tmp_path)
+    base={k:args[k] for k in ['helper','condition','baseline_masks','initial_masks']}
+    assert ft.load_inputs(**base)['seeds'][0] is None
+    inputs=ft.load_inputs(**base,source_association_config=config)
+    report=inputs['seed_reports'][0]
+    assert report['status']=='heuristic_selected' and report['selected_row']==0
+    assert report['selection_margin']>.19 and report['candidate_margin_required']==.05
+    assert report['heuristic_not_ground_truth'] and not report['depth_used']
+    assert report['frames_used']==[0] and report['config_sha256']==file_sha256(config)
+    crop=json.loads((args['condition']/'preparation.json').read_text())['source_crop_xywh']
+    np.testing.assert_array_equal(inputs['seeds'][0],ft.source_seed(masks[0],crop,rgb.shape[2:4]))
+    result=ft.run(**args,source_association_config=config,track=fake_track)
+    assert result['status']=='complete' and result['seeded_views']==[0,1,2,3]
+    assert result['input_files'][str(config.resolve())]==file_sha256(config)
+
+
+def test_optional_source_association_keeps_equal_hypotheses_unsupported(tmp_path):
+    args,_,_,config=association_fixture(tmp_path,scores=(.8,.8))
+    result=ft.run(**args,source_association_config=config,track=fake_track)
+    assert result['unsupported_views']==[0]
+    assert result['seeds'][0]['status']=='ambiguous'
+    assert result['seeds'][0]['selection_margin']==0
+    with np.load(args['output']/'source-only/tracker-logits.npz') as z:
+        assert not z['processed'].any() and np.isnan(z['mask_logits']).all()
+
+
+def test_source_association_config_tampering_rejects_output(tmp_path):
+    args,_,_,config=association_fixture(tmp_path)
+    def altered(video,seed):
+        config.write_text(config.read_text()+' ')
+        yield from fake_track(video,seed)
+    with pytest.raises(ValueError,match='inputs changed'):
+        ft.run(**args,source_association_config=config,track=altered)
+    assert json.loads((args['output']/'execution.json').read_text())['status']=='failed'
+
+
+def test_source_association_rejects_extra_native_time_even_without_later_candidates(tmp_path):
+    _,_,_,config=association_fixture(tmp_path)
+    native=ft.arrays(tmp_path/'initial-masks/masks.npz');native['timestamps']=np.array([2.,3.])
+    with pytest.raises(ValueError,match='exactly one source image'):
+        ft.associate_source_seed(native,config)
+
+
+def transport_fixture():
+    image=np.zeros((160,320,3),np.uint8);seed=np.zeros((160,320),bool);seed[75:85,150:160]=True
+    xx,yy=np.meshgrid(np.linspace(20,300,7),np.linspace(20,140,5))
+    a=np.c_[xx.ravel(),yy.ravel()];b=a+np.array([5.,-3.])
+    counts=dict(source_features=80,target_features=80,mutual_matches=len(a),homography_inliers=len(a))
+    return image,seed,a,b,counts
+
+
+def test_background_transport_moves_mask_without_camera_or_object_detector_input():
+    image,seed,a,b,counts=transport_fixture()
+    mask,report=ft.transport_seed(image,image,seed,~seed,match_fn=lambda *_:(a,b,counts))
+    expected=np.zeros_like(seed);expected[72:82,155:165]=True
+    np.testing.assert_array_equal(mask,expected)
+    assert report['status']=='transported_hypothesis' and report['local_inliers']>=3
+    assert not report['ground_truth_used'] and not report['requested_cameras_used']
+    assert report['median_error_px']<1e-5 and report['area_ratio']==1
+
+
+@pytest.mark.parametrize('bad',['few_matches','clustered','far_from_target'])
+def test_unreliable_background_transport_stays_unknown(bad):
+    image,seed,a,b,counts=transport_fixture()
+    if bad=='few_matches':a=a[:5];b=b[:5]
+    elif bad=='clustered':a=a*.05+100;b=a+5
+    else:a[:,0]=a[:,0]*.3;b=a+5
+    counts.update(mutual_matches=len(a),homography_inliers=len(a))
+    mask,report=ft.transport_seed(image,image,seed,~seed,match_fn=lambda *_:(a,b,counts))
+    assert mask is None and report['status']=='unsupported'
+
+
+def test_helper_transport_overrides_unrelated_detector_seed_but_never_source_evidence(tmp_path,monkeypatch):
+    args,rgb,_,config=association_fixture(tmp_path);calls=[]
+    def transport(source,target,seed,allowed):
+        np.testing.assert_array_equal(source,rgb[0,0]);assert not allowed[seed].any()
+        calls.append(target.copy())
+        return seed.copy(),dict(status='transported_hypothesis')
+    monkeypatch.setattr(ft,'transport_seed',transport)
+    result=ft.run(**args,source_association_config=config,helper_seed_transport=True,track=fake_track)
+    assert result['cross_view_identity_estimated'] and len(calls)==6 # before and after immutable-input check
+    assert all(x['source']=='source_mask_transported_to_generated_helper_t0' for x in result['seeds'][1:])
+    report=load_manifest(args['output']/'source-only/input-manifest.json')
+    assert 'generated_helper_rgb' not in report['method_artifact_ids']
+
+
+def test_helper_transport_never_falls_back_to_unrelated_detection_when_source_ambiguous(tmp_path,monkeypatch):
+    args,_,_,config=association_fixture(tmp_path,scores=(.8,.8))
+    def forbidden(*_):raise AssertionError('Ambiguous source cannot seed any helper')
+    monkeypatch.setattr(ft,'transport_seed',forbidden)
+    result=ft.run(**args,source_association_config=config,helper_seed_transport=True,track=forbidden)
+    assert not result['tracker_executed'] and result['unsupported_views']==[0,1,2,3]
+    assert all(x['reason']=='source_seed_unavailable' for x in result['seeds'][1:])
+
+
 def test_visibility_and_area_gates_do_not_invent_mask_confidence():
     logits=np.ones((4,4));mask,score,valid=ft.candidate(logits,-1.)
     assert mask.sum()==16 and score<.5 and not valid

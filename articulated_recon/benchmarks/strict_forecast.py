@@ -191,6 +191,32 @@ def prepare_forecast(*, geometry_bundle, scene_path, scene_manifest, output, obj
     return prep
 
 
+def verify_condition_arrays(actual, expected):
+    """Recreate inputs exactly, allowing only float64 camera-design roundoff.
+
+    NumPy/BLAS builds can differ by a few ULPs when normalizing virtual-camera
+    bases. This is not a geometric tolerance: stored arrays remain hash-bound,
+    and RGB, K, timestamps and source IDs must still match exactly. At zero the
+    bound is eight float64 subnormal steps, not an absolute camera tolerance.
+    """
+    if set(actual)!=set(expected):
+        raise ValueError('Forecast conditioning arrays have extra or missing fields')
+    camera_report=None
+    for name,wanted in expected.items():
+        value=np.asarray(actual[name]);wanted=np.asarray(wanted)
+        if name=='c2w':
+            if value.shape!=wanted.shape or value.dtype!=np.dtype('float64') or wanted.dtype!=np.dtype('float64') or not np.isfinite(value).all():
+                raise ValueError('Recreated forecast cameras require finite float64 arrays with identical shape')
+            spacing=np.spacing(np.abs(wanted));difference=np.abs(value-wanted)
+            if not np.all(difference<=8*spacing):
+                raise ValueError('Forecast camera requests differ beyond float64 recreation roundoff')
+            camera_report=dict(exact=bool(np.array_equal(value,wanted)),max_abs_difference=float(difference.max()),
+                max_float64_spacing_units=float(np.max(difference/spacing)),allowed_float64_spacing_units=8)
+        elif not np.array_equal(value,wanted):
+            raise ValueError('Forecast arrays differ from first-image-only camera/horizon preparation: '+name)
+    return dict(non_camera_arrays_exact=True,camera_recreation=camera_report,stored_artifact_hash_verification_unchanged=True)
+
+
 def validate_forecast(condition):
     condition = Path(condition).resolve()
     prep = json.loads((condition/'preparation.json').read_text())
@@ -208,8 +234,7 @@ def validate_forecast(condition):
     if file_sha256(condition/'condition.npz') != prep['condition_sha256']:
         raise ValueError('Forecast condition changed')
     with np.load(condition/'condition.npz', allow_pickle=False) as z:
-        if set(z.files) != set(expected) or any(not np.array_equal(z[n], a) for n, a in expected.items()):
-            raise ValueError('Forecast arrays differ from first-image-only camera/horizon preparation')
+        report['condition_recreation']=verify_condition_arrays(z,expected)
     expected_records = {a['id']: a for a in manifest['artifacts']}
     actual_records = {a['id']: a for a in actual_manifest['artifacts']}
     if set(actual_records) != set(expected_records) | {'forecast_camera_requests'}:

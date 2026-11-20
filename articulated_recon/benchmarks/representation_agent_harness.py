@@ -81,11 +81,16 @@ def prepare_suite(packets, output, seed=20261119):
         first, second = group
         if first[1]['common_evidence_sha256'] != second[1]['common_evidence_sha256']:
             raise ValueError('Matched representations must contain byte-identical selected observations')
-        for key in ['shared_asset_sha256', 'masks_sha256', 'tracks_sha256']:
+        for key in ['shared_asset_sha256', 'masks_sha256', 'tracks_sha256', 'initial_scene_sha256', 'optimizer_config_sha256']:
             if first[0]['source_parents'].get(key) != second[0]['source_parents'].get(key):
                 raise ValueError('Matched representations differ in raw evidence: ' + key)
         if first[1]['files'].get('tracks.npz') != second[1]['files'].get('tracks.npz'):
             raise ValueError('Matched representations differ in selected point correspondences')
+        shared_names=set(first[1]['files'])|set(second[1]['files'])
+        for name in shared_names:
+            if name.startswith('optimizer/') or name in {'raw-predictions.npz','raw-masks.npz','first-image-scene.json','optimizer-config.json','scene_tools.py','scene_sequence.py'}:
+                if first[1]['files'].get(name)!=second[1]['files'].get(name):
+                    raise ValueError('Matched representations differ in shared source tools/evidence: '+name)
         if first[0]['frontend_context_frame_ids'] != second[0]['frontend_context_frame_ids']:
             raise ValueError('Matched representations differ in upstream frontend context')
     random.Random(seed).shuffle(runs)
@@ -93,7 +98,7 @@ def prepare_suite(packets, output, seed=20261119):
     suite = dict(schema_version=1, runs=runs, seed=seed, config=config,
         config_sha256=next(iter(configs)), prompt_sha256=next(iter(prompts)),
         runner_sha256=digest(__file__), agent_status='not_started',
-        experimental_factors=['representation A_raw vs B_object', 'agent selected-frame budget'],
+        experimental_factors=['representation A_raw vs B_object', 'evidence branch or agent selected-frame budget'],
         limitations=['No claim of sparse frontend inference from a sparse agent packet.',
                      'Source agreement is not GT geometry/contact/execution accuracy.',
                      'One stochastic attempt per cell is descriptive, not a stable ranking.'])
@@ -188,6 +193,7 @@ def event_accounting(path):
                 completed[identifier] = item
     usage = {name: sum(x.get(name,0) for x in tokens) if tokens else None
              for name in ['input_tokens','cached_input_tokens','output_tokens']}
+    usage['uncached_input_tokens']=(max(0,usage['input_tokens']-usage['cached_input_tokens']) if tokens else None)
     return dict(agent_invocations=1, completed_agent_turns=turn_count,
         model_requests=None, model_request_count_status='not_exposed_by_cli_turn_events',
         tool_calls_started=len(started_tools), tool_calls_completed=len(completed),
@@ -279,7 +285,8 @@ def run_one(suite_path, run_id, codex='codex', execute=False):
     with (workspace/'execution-receipt.json').open('x') as stream:
         json.dump(receipt,stream,indent=2)
     result.update(executed=True,status='running',started_unix=start_wall, model=config['model'],
-                  config_sha256=suite['config_sha256'], prompt_sha256=suite['prompt_sha256'])
+                  config_sha256=suite['config_sha256'], prompt_sha256=suite['prompt_sha256'],
+                  preprocessing_timing_seconds=packet.get('preprocessing_timing_seconds',{}))
     write_json(logs/'status.json', result)
     records = []
     with (logs/'events.jsonl').open('w') as events, (logs/'stderr.txt').open('w') as errors:
