@@ -35,6 +35,34 @@ including generation and model startup; under ten minutes and zero-shot
 transfer remain hypotheses to test. SE(3) is a common motion description, but
 robot reachability, grasp compatibility and control still require retargeting.
 
+The current `world_model_views.py --conditioning first_frame_diagnostic` is
+explicitly **not** this strict forecast experiment: its camera/scene ancestry
+can still derive from the recorded full clip and its receipt sets
+`strict_forecasting_claim=false`. Rebuild the source bundle, scene initialization
+and camera requests from the initial image only before making the main claim.
+Custom task-text embeddings are already supported with a verification receipt;
+use a bound task prompt instead of assuming the default cached task matches.
+
+The minimal integration work identified in the code audit is:
+
+- Add strict first-image preparation and camera ancestry.
+- Wire the intended UGG RGB/depth output. The current `world_model_views.py`
+  adapter exports RGB; depth estimated afterward must be labeled as a separate
+  estimator. Mark the generated future source stream as `source_forecast`.
+- Adapt `da3_helper_views.py` before using it on forecasts: its reconstruction
+  path restores recorded source pixels throughout the sequence, whereas future
+  pixels in the main experiment must remain generated predictions.
+- Connect the agent's shared scene/motion to the existing registered planner
+  and frozen independent executor. The current planner produces TCP/gripper
+  targets; it is not a learned inverse-dynamics model.
+- Verify realized camera differences and task motion before downstream fitting.
+  Nonzero requested camera baselines alone do not prove distinct, accurate views.
+
+These are deployment-time input boundaries. Real sequences and their recorded
+multiview RGB can supply training targets within a separate training split;
+future observations from a held-out deployment case remain unavailable to the
+method. A two-clip preparation pilot is not world-model training.
+
 Recorded-video reconstruction and the real-video representation study are
 supporting diagnostics. A direct image-to-scene agent that plans in its own
 simulator is a separate baseline and must not be presented as execution of a
