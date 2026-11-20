@@ -5,7 +5,44 @@ This document defines the staged experiment plan and input validator. See
 listing a condition here does not mean it has run. Model checkpoints, exact RGB
 clips, budgets and the evaluation boundary must be bound for each frozen run.
 
-## First batch
+## Current priority: single image to an executable task plan
+
+The clarified project target is one observed RGB image plus a task instruction
+to an executable plan. Start with the existing multiview RGB/depth world model
+described in the meeting as UGG. Establish this simple path before adding new
+prediction heads, a new world-model architecture, or a large training sweep:
+
+1. Bind one image and a task prompt. Future recorded frames, reference object
+   poses, measured depth and supplied scene calibration stay evaluator-only.
+   Known robot models and the explicit fixed deployment calibration remain
+   separate deployment inputs.
+2. Generate temporally consistent views of the task being performed. Different
+   camera views of a static scene do not establish a motion plan. Audit the
+   actual conditioning code: a cached task embedding or an image forecast alone
+   is not proof of following the requested task instruction.
+3. Let the agent build one shared scene, task-relevant shapes and object/hand
+   motion across the generated sequence. Start with existing RGB/depth outputs;
+   derived masks and other estimators may assist reconstruction without claiming
+   that the world model already predicts those modalities.
+4. Retarget the reconstructed motion to the specified robot, freeze commands,
+   then execute once in the independent evaluation scene. Keep the existing
+   no-simulator-feedback-to-planner boundary.
+
+The first successful demonstration must show the exact observed image and task,
+generated cameras over time, reconstructed 3D trajectory, and independent
+execution. Preserve failed generations and rejected plans. Report total time
+including generation and model startup; under ten minutes and zero-shot
+transfer remain hypotheses to test. SE(3) is a common motion description, but
+robot reachability, grasp compatibility and control still require retargeting.
+
+Recorded-video reconstruction and the real-video representation study are
+supporting diagnostics. A direct image-to-scene agent that plans in its own
+simulator is a separate baseline and must not be presented as execution of a
+world-model-predicted plan. The existing matrix generator retains its historical
+reconstruction defaults; `--include-forecast` exposes the already-defined
+first-frame conditions. No job order is changed automatically by this document.
+
+## Existing reconstruction diagnostics
 
 The initial cases are the RH20T block and HO-Cap bottle demonstrations. Each uses
 one recorded RGB camera, with the same crop, timestamps and source bytes across
@@ -33,7 +70,7 @@ generation cost. Native sparse generation is a later experiment. Similarly,
 compressing an already fitted 3D trajectory measures fidelity to that fit, not
 independent reconstruction accuracy.
 
-## Separate later comparisons
+## Forecast conditions and other comparisons
 
 - **First-frame forecasts:** only the first observed frame is supplied. The
   source-only baseline must obtain future source-camera motion from the world
@@ -105,7 +142,8 @@ From `articulated_recon`:
 python benchmarks/experiment_matrix.py plan --out /path/to/experiment-plan.json
 python benchmarks/experiment_matrix.py validate /path/to/experiment-plan.json
 
-# Only when preparing later stages; these flags still launch no jobs.
+# Include first-frame forecasts for the current primary objective.
+# These flags still only prepare configs; they launch no jobs.
 python benchmarks/experiment_matrix.py plan \
   --include-forecast --include-external --out /path/to/later-plan.json
 

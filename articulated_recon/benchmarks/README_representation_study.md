@@ -5,6 +5,13 @@ GPU inference, fresh agent results, training, or successful execution.
 
 ## Question and comparison
 
+This study supports the primary **single image + task → generated multiview
+task sequence → agent-built 3D scene/motion → frozen execution** experiment.
+The recorded real clips isolate reconstruction errors; consuming their full
+observed motion cannot count as a single-image planning result. Keep the first
+end-to-end run on the existing world model's RGB/depth outputs. Additional
+modalities and compact prediction targets follow measured downstream failures.
+
 Which organization of the same model-derived evidence lets an agent recover a
 shared scene and motion more accurately, with less refinement? The useful result
 would identify a compact prediction target for the world model. Predicting RGB,

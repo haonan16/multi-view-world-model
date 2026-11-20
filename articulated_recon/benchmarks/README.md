@@ -1,7 +1,9 @@
 # RGB scene and motion experiments
 
-Target: recorded RGB or an RGB-conditioned forecast → estimated scene/motion →
-frozen robot commands → a separately constructed evaluation simulator.
+Main target: one observed RGB image plus a task → world-model-generated
+multiview task sequence → agent-built shared 3D scene and motion → frozen robot
+commands → a separately constructed evaluation simulator. Recorded full-video
+reconstruction is a diagnostic for this pipeline, not the main deployment input.
 
 The code in this directory implements RGB inference, source-scene fitting,
 comparison configuration, frozen planning and independent execution. The block
