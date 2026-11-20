@@ -25,6 +25,7 @@ has not been demonstrated by these experiments.
 - [Real RGB representation study and training boundary](README_representation_study.md)
 - [Frozen real-video training / held-out split](README_real_video_split.md)
 - [Native Pi4 geometry and motion frontend](README_pi4.md)
+- [Independent Pi4 depth and camera-drift evaluation](README_pi4_evaluation.md)
 - `rgb_frontend.py`: isolate one recorded RGB camera, then predict metric depth
   and camera intrinsics with an existing local UniDepthV2 checkpoint.
 - `keyframe_compression.py`: compress saved fitted trajectories and measure the

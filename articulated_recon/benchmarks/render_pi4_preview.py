@@ -177,6 +177,7 @@ def render(run_dir, output, fps=30., max_points=60000, orbit_degrees=100.,
 
     if not np.isfinite(orbit_degrees) or not 0 <= orbit_degrees <= 360:
         raise ValueError('Orbit sweep must be in [0,360] degrees')
+    renderer_hash = sha256(__file__)
     data = load_predictions(run_dir)
     rgb, points, depth = data['rgb'], data['points'], data['depth']
     count, height, width, _ = rgb.shape
@@ -231,9 +232,11 @@ def render(run_dir, output, fps=30., max_points=60000, orbit_degrees=100.,
     for path, expected in data['bindings'].items():
         if sha256(path) != expected:
             raise ValueError('Prediction artifact changed while rendering: ' + path)
+    if sha256(__file__) != renderer_hash:
+        raise ValueError('Renderer code changed while rendering')
     intervals = np.diff(data['timestamps'])
     report = dict(schema='pi4-source-preview-v1', status='complete', input_hashes=data['bindings'],
-        renderer_sha256=sha256(__file__), metric_scale='estimated by Pi4; no reference scale or alignment',
+        renderer_sha256=renderer_hash, metric_scale='estimated by Pi4; no reference scale or alignment',
         panels=['recorded source RGB at model resolution', 'predicted local Z depth',
                 'native predicted world points with source RGB colors, rendered from virtual orbit cameras'],
         reference_data_read=False, generated_rgb=False, geometry_interpolated=False,

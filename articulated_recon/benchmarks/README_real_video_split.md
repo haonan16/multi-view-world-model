@@ -125,5 +125,60 @@ the exact fallback downloader and preview producer.
 model or annotation overlays are used. The tables contain distractor objects.
 In the spatula case the manipulated utensil is pink; a teal spatula remains on
 the table. `method/target-prompts.json` fixes the source-RGB-derived prompt
-`pink spatula being lifted` before fitting. Evaluator references and new
-representation scores remain unmeasured.
+`pink spatula being lifted` before fitting. New representation scores remain
+unmeasured.
+
+## Predicted-geometry previews
+
+`render_pi4_preview.py` reads only a completed Pi4 run's `geometry.npz` and
+`inference.json`. It renders source RGB at the model's resolution, predicted
+local-Z depth, and a virtual orbit around the native predicted world points.
+Colors come from all sampled source pixels; no task masks, evaluator references,
+generated RGB, mesh completion, or hidden-surface synthesis are used.
+
+The point panel uses a constant set of at most 60,000 flattened image indices,
+one sequence-wide clipping box, fixed framing, and one-pixel nearest-depth
+rendering. The first predicted camera defines the display orientation. The
+depth panel uses one sequence-wide 2nd–98th percentile color range. These are
+display choices, not geometry corrections or per-frame alignments.
+
+```bash
+python render_pi4_preview.py --run-dir "$PI4_RUN" --output "$PREVIEW"
+```
+
+The default video is 30 fps. For the fixed stride-five inputs it repeats each
+6 Hz prediction five times, including its virtual camera view; geometry and RGB
+are not interpolated. `render.json` preserves input hashes, original timestamp
+and source-index maps, repeated-frame mapping, display clipping, virtual cameras,
+sampling indices, and the fact that metric scale is model-estimated. Six tests
+check synthetic projection, rigid-coordinate invariance, nearest-point
+occlusion, shared clipping, frame timing, and actual MP4 encoding. They are
+renderer tests, not reconstruction-quality results.
+
+## Evaluator-only measured-depth references
+
+`outputs/real-video-20261119/mirror-rgb/evaluator/measured-depth-stride5/`
+contains 72 original depth PNGs and three original sequence metadata files,
+7,421,896 bytes in total. Each case uses source indices `0,5,...,115`; original
+IDs are those indices plus its frozen window start. `references.json` binds the
+three `hocap-depth-reference-v1` manifests. They record source RGB bundle and
+JPEG identities, exact original IDs/timestamps, PNG hashes, units, convention
+evidence, and zero-hole preservation. Their verification status is complete;
+evaluation status remains unmeasured and scores are null.
+
+The pinned official [sequence loader](https://github.com/IRVLUTD/HO-Cap/blob/576c63ebf3b84dfec8744ba0f021234213bf0dab/hocap_toolkit/loaders/sequence_loader.py)
+requests a scale of 1000, and the official
+[depth reader](https://github.com/IRVLUTD/HO-Cap/blob/576c63ebf3b84dfec8744ba0f021234213bf0dab/hocap_toolkit/utils/io.py)
+divides original integer depth by that scale. The references therefore declare
+`scale_to_m=0.001`. The loader deprojects with color-camera inverse intrinsics
+and the unnormalized `[u,v,1]` ray, establishing the consumed color-grid camera-Z
+convention. It reuses one published RealSense extrinsic per sequence; the
+fixed-camera flag records that capture convention, not a new measurement of
+microscopic camera motion or calibration accuracy.
+
+Label NPZ files were skipped: their ZIP central directory alone needs 77,630,789
+bytes, exceeding the 75 MB combined reference budget. The reader stopped before
+that transfer. Reference manifests set label files and label ID maps to null;
+object/hand/background scores requiring those masks remain unavailable. The
+download and finalization receipts confirm that no predictions were opened and
+no metrics were computed during reference preparation.
